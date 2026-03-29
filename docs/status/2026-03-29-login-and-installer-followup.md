@@ -18,6 +18,7 @@ HEADLESS=true PSN_LOGIN_URL='https://web.np.playstation.com/api/session/v1/signi
 
 - Confidence increased that a **user-assisted headed flow** is the best near-term path for capturing cookies and storage cleanly.
 - A dedicated headed helper (`npm run auth:psn-headed`) is now the preferred next step.
+- The first helper heuristic produced a false positive on a public PlayStation Network page, so the helper was tightened to wait for stronger auth signals or a longer manual window before capture.
 
 ## PC installer first pass
 

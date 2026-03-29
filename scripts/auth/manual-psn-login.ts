@@ -8,7 +8,8 @@ const loginUrl = env.PSN_LOGIN_URL || 'https://web.np.playstation.com/api/sessio
 const storageStatePath = resolveArtifactPath(env.PSN_STORAGE_STATE, 'artifacts/auth/playstation-storage-state.json');
 const dumpPath = resolveArtifactPath(undefined, 'artifacts/auth/manual-login-dump.json');
 const screenshotPath = resolveArtifactPath(undefined, 'artifacts/auth/manual-login-final.png');
-const timeoutMs = 15 * 60 * 1000;
+const waitSeconds = Number(process.env.MANUAL_AUTH_WAIT_SECONDS || '300');
+const timeoutMs = waitSeconds * 1000;
 
 async function ensureParent(filePath: string) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -78,7 +79,7 @@ async function main() {
   console.log('[ps-wen] Opening headed PlayStation login flow');
   console.log(`[ps-wen] Login URL: ${loginUrl}`);
   console.log('[ps-wen] Complete sign-in in the browser window.');
-  console.log('[ps-wen] The script will auto-save cookies/storage once it sees Sony cookies and you are off the sign-in page.');
+  console.log(`[ps-wen] Leave the browser on a post-login page. Capture will occur after up to ${waitSeconds} seconds, or sooner on a stronger auth signal.`);
 
   await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
   await prefillEmail(page, env.PSN_EMAIL);
@@ -89,10 +90,21 @@ async function main() {
   while (Date.now() - startedAt < timeoutMs) {
     const cookies = await context.cookies();
     const sonyCookies = cookies.filter((cookie) => /sony|playstation/i.test(cookie.domain));
+    const authLikeCookies = cookies.filter(
+      (cookie) => /my\.account\.sony\.com/i.test(cookie.domain) || /kp_|token|sess|auth|login/i.test(cookie.name)
+    );
     const currentUrl = page.url();
     const offSignin = !/signin|oauth|login/i.test(currentUrl);
+    let bodyText = '';
+    try {
+      bodyText = await page.locator('body').innerText({ timeout: 1_000 });
+    } catch {
+      bodyText = '';
+    }
+    const hasSigninPrompt = /sign in to your psn account|create psn account/i.test(bodyText);
+    const strongSignal = authLikeCookies.length > 0 && offSignin && !hasSigninPrompt;
 
-    if (sonyCookies.length > 0 && offSignin) {
+    if (strongSignal || (sonyCookies.length > 0 && /my\.account\.sony\.com|store\.playstation\.com/i.test(currentUrl) && !hasSigninPrompt)) {
       detected = true;
       break;
     }
@@ -114,12 +126,23 @@ async function main() {
   const originStorage = await gatherOriginStorage(context);
   await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
 
+  let bodyText = '';
+  try {
+    bodyText = await page.locator('body').innerText({ timeout: 2_000 });
+  } catch {
+    bodyText = '';
+  }
+
   const dump = {
     generatedAt: new Date().toISOString(),
     detectedSignInCompletion: detected,
     currentUrl: page.url(),
     pages,
     sonyCookieCount: cookies.filter((cookie) => /sony|playstation/i.test(cookie.domain)).length,
+    authLikeCookieNames: cookies
+      .filter((cookie) => /my\.account\.sony\.com/i.test(cookie.domain) || /kp_|token|sess|auth|login/i.test(cookie.name))
+      .map((cookie) => `${cookie.domain}:${cookie.name}`),
+    signInPromptVisible: /sign in to your psn account|create psn account/i.test(bodyText),
     originStorage,
     storageStatePath,
     screenshotPath

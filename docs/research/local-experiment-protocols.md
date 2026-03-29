@@ -27,6 +27,7 @@ Prep:
 Execution:
 1. try the automated smoke first: `npm run test:psn-login`
 2. if automation is brittle, use the headed/manual helper: `npm run auth:psn-headed`
+   - optional: set `MANUAL_AUTH_WAIT_SECONDS=300` (or longer) to give yourself more time in the browser
 3. watch for CAPTCHA / MFA / consent screens
 4. if the run succeeds, inspect:
    - `artifacts/auth/playstation-storage-state.json`
