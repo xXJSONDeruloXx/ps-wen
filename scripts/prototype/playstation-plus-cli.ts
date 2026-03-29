@@ -12,12 +12,18 @@ import {
   type PcSurfaceSummaryArtifact,
   type PlayStationPlusPrototypeStatus
 } from '../../src/providers/playstation-plus-observation-provider.js';
+import {
+  createInitialPlayStationPlusFlowState,
+  transitionPlayStationPlusFlowState,
+  type PlayStationPlusFlowState
+} from '../../src/prototype/playstation-plus-state-machine.js';
 
 const DEFAULT_BROWSER_AUTH_SUMMARY = 'artifacts/auth/playstation-auth-summary.json';
 const DEFAULT_PC_AUTH_SUMMARY = 'artifacts/auth/playstation-plus-pc-auth-summary.json';
 const DEFAULT_PC_SURFACE_SUMMARY = 'artifacts/static/playstation-plus-pc-surface.json';
 const DEFAULT_PC_APOLLO_SUMMARY = 'artifacts/public/playstation-plus-pc-apollo-summary.json';
 const DEFAULT_NETWORK_DIR = 'artifacts/network';
+const DEFAULT_FLOW_STATE = 'artifacts/prototype/playstation-plus-flow-state.json';
 const DEFAULT_PSN_LOGIN_URL =
   'https://web.np.playstation.com/api/session/v1/signin?redirect_uri=https%3A%2F%2Fstore.playstation.com%2F';
 
@@ -32,8 +38,10 @@ function usage(): never {
     [
       'Usage:',
       '  npm run prototype:psplus -- status [--json]',
-      '  npm run prototype:psplus -- login [--dry-run]',
+      '  npm run prototype:psplus -- login [--wait-seconds 300] [--dry-run]',
       '  npm run prototype:psplus -- login --capture-artifacts [--wait-seconds 300] [--dry-run]',
+      '  npm run prototype:psplus -- confirm-login [--note "already logged in"] [--json]',
+      '  npm run prototype:psplus -- reset-flow [--json]',
       '  npm run prototype:psplus -- bootstrap',
       '  npm run prototype:psplus -- entitlements',
       '  npm run prototype:psplus -- allocate [--title-id CUSA00001] [--region us] [--quality auto]'
@@ -95,6 +103,21 @@ async function readJsonIfExists<T>(filePath: string): Promise<T | null> {
   }
 }
 
+function resolveFlowStatePath() {
+  return resolveArtifactPath(undefined, DEFAULT_FLOW_STATE);
+}
+
+async function loadFlowState(): Promise<PlayStationPlusFlowState | null> {
+  return readJsonIfExists<PlayStationPlusFlowState>(resolveFlowStatePath());
+}
+
+async function writeFlowState(state: PlayStationPlusFlowState) {
+  const outputPath = resolveFlowStatePath();
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  return outputPath;
+}
+
 async function readLatestNetworkSummaries(networkDir: string): Promise<NetworkSummaryArtifact[]> {
   try {
     const entries = await fs.readdir(networkDir);
@@ -136,13 +159,37 @@ async function loadProvider() {
   });
 }
 
-function printStatus(status: PlayStationPlusPrototypeStatus) {
+function printFlowState(flowState: PlayStationPlusFlowState | null) {
+  console.log(`Flow phase       : ${flowState?.phase ?? '(not started)'}`);
+  if (!flowState) {
+    console.log('Flow next        : run `npm run prototype:psplus -- login --wait-seconds 600` to begin the browser-auth flow');
+    return;
+  }
+
+  if (flowState.browserLogin.openedAt) {
+    console.log(`Login opened at  : ${flowState.browserLogin.openedAt}`);
+  }
+  if (flowState.browserLogin.confirmedAt) {
+    console.log(`Login confirmed  : ${flowState.browserLogin.confirmedAt}`);
+  }
+  if (flowState.browserLogin.confirmationNote) {
+    console.log(`Confirm note     : ${flowState.browserLogin.confirmationNote}`);
+  }
+  if (flowState.lastObservation) {
+    console.log(
+      `Observed state   : signedIn=${flowState.lastObservation.signedIn} entitlements=${flowState.lastObservation.entitlementsState} allocation=${flowState.lastObservation.sessionAllocationState}`
+    );
+  }
+}
+
+function printStatus(status: PlayStationPlusPrototypeStatus, flowState: PlayStationPlusFlowState | null) {
   console.log(`Signed in        : ${status.session.signedIn} (${status.session.surface})`);
   console.log(`App URL          : ${status.app.currentAppUrl ?? '(unknown)'}`);
   console.log(`Runtime          : ${status.app.runtimeVersion ?? '(unknown)'}`);
   console.log(`Local broker     : ${status.app.localhostBrokerUrl ?? '(not observed)'}`);
   console.log(`Preload commands : ${status.app.preloadCommandCount}`);
   console.log(`Captured hosts   : ${status.hosts.captured.length}`);
+  printFlowState(flowState);
   console.log('');
   console.log('Capabilities');
   for (const [name, capability] of Object.entries(status.capabilities)) {
@@ -156,7 +203,7 @@ function printStatus(status: PlayStationPlusPrototypeStatus) {
   }
   console.log('');
   console.log('Next steps');
-  for (const step of status.nextSteps) {
+  for (const step of flowState?.nextActions ?? status.nextSteps) {
     console.log(`- ${step}`);
   }
 }
@@ -164,13 +211,17 @@ function printStatus(status: PlayStationPlusPrototypeStatus) {
 async function cmdStatus(parsed: ParsedArgs) {
   const provider = await loadProvider();
   const status = await provider.getStatus();
+  const storedFlowState = await loadFlowState();
+  const flowState = storedFlowState
+    ? transitionPlayStationPlusFlowState(storedFlowState, { type: 'sync-provider-status', status })
+    : null;
 
   if (parsed.flags.json) {
-    console.log(JSON.stringify(status, null, 2));
+    console.log(JSON.stringify({ providerStatus: status, flowState }, null, 2));
     return;
   }
 
-  printStatus(status);
+  printStatus(status, flowState);
 }
 
 async function cmdBootstrap() {
@@ -197,6 +248,43 @@ async function cmdAllocate(parsed: ParsedArgs) {
 
   const allocation = await provider.allocate({ titleId, regionPreference, qualityPreference });
   console.log(JSON.stringify(allocation, null, 2));
+}
+
+async function cmdConfirmLogin(parsed: ParsedArgs) {
+  const provider = await loadProvider();
+  const status = await provider.getStatus();
+  const note = typeof parsed.flags.note === 'string' ? parsed.flags.note : undefined;
+  const currentState = (await loadFlowState()) ?? createInitialPlayStationPlusFlowState();
+  const confirmedState = transitionPlayStationPlusFlowState(currentState, {
+    type: 'confirm-browser-login',
+    note
+  });
+  const syncedState = transitionPlayStationPlusFlowState(confirmedState, {
+    type: 'sync-provider-status',
+    status
+  });
+  const outputPath = await writeFlowState(syncedState);
+
+  if (parsed.flags.json) {
+    console.log(JSON.stringify({ flowStatePath: outputPath, flowState: syncedState, providerStatus: status }, null, 2));
+    return;
+  }
+
+  console.log(`[ps-wen] Updated flow state: ${outputPath}`);
+  printStatus(status, syncedState);
+}
+
+async function cmdResetFlow(parsed: ParsedArgs) {
+  const state = transitionPlayStationPlusFlowState(createInitialPlayStationPlusFlowState(), { type: 'reset' });
+  const outputPath = await writeFlowState(state);
+
+  if (parsed.flags.json) {
+    console.log(JSON.stringify({ flowStatePath: outputPath, flowState: state }, null, 2));
+    return;
+  }
+
+  console.log(`[ps-wen] Reset flow state: ${outputPath}`);
+  printFlowState(state);
 }
 
 function resolveLoginUrl() {
@@ -336,20 +424,50 @@ async function runFirstWorkingSpawnSpec(specs: Array<{ command: string; args: st
 async function cmdLogin(parsed: ParsedArgs) {
   const captureArtifacts = Boolean(parsed.flags['capture-artifacts']);
   const waitSeconds = parseWaitSeconds(parsed.flags);
+  const loginUrl = resolveLoginUrl();
 
   if (captureArtifacts) {
     const spec = buildLoginCaptureSpawnSpec(parsed);
     if (parsed.flags['dry-run']) {
-      console.log(JSON.stringify({ mode: 'capture-artifacts', command: spec.command, args: spec.args }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            mode: 'capture-artifacts',
+            loginUrl,
+            command: spec.command,
+            args: spec.args,
+            flowStatePath: resolveFlowStatePath()
+          },
+          null,
+          2
+        )
+      );
       return;
     }
 
+    let flowState = transitionPlayStationPlusFlowState(
+      (await loadFlowState()) ?? createInitialPlayStationPlusFlowState(),
+      {
+        type: 'open-browser-login',
+        mode: 'capture-artifacts',
+        loginUrl,
+        waitSeconds
+      }
+    );
+    const flowPath = await writeFlowState(flowState);
+    console.log(`[ps-wen] Flow state: ${flowPath}`);
     console.log('[ps-wen] Launching official browser login helper with local artifact capture...');
     await runSpawnSpec(spec);
+
+    const provider = await loadProvider();
+    const status = await provider.getStatus();
+    flowState = transitionPlayStationPlusFlowState(flowState, { type: 'sync-provider-status', status });
+    await writeFlowState(flowState);
+    console.log('[ps-wen] Flow state synchronized from captured auth artifacts.');
+    printStatus(status, flowState);
     return;
   }
 
-  const loginUrl = resolveLoginUrl();
   const specs = buildSystemBrowserOpenSpecs(loginUrl);
   if (parsed.flags['dry-run']) {
     console.log(
@@ -357,6 +475,7 @@ async function cmdLogin(parsed: ParsedArgs) {
         {
           mode: 'system-browser',
           loginUrl,
+          flowStatePath: resolveFlowStatePath(),
           attempts: specs.map((spec) => ({ command: spec.command, args: spec.args }))
         },
         null,
@@ -368,8 +487,19 @@ async function cmdLogin(parsed: ParsedArgs) {
 
   console.log('[ps-wen] Opening official PlayStation sign-in URL in your default browser...');
   const usedSpec = await runFirstWorkingSpawnSpec(specs);
+  const flowState = transitionPlayStationPlusFlowState(
+    (await loadFlowState()) ?? createInitialPlayStationPlusFlowState(),
+    {
+      type: 'open-browser-login',
+      mode: 'system-browser',
+      loginUrl,
+      waitSeconds
+    }
+  );
+  const flowPath = await writeFlowState(flowState);
   console.log(`[ps-wen] Opened: ${loginUrl}`);
   console.log(`[ps-wen] Launcher: ${usedSpec.command}`);
+  console.log(`[ps-wen] Flow state: ${flowPath}`);
   console.log('[ps-wen] This system-browser mode does not capture cookies or storage artifacts.');
   console.log('[ps-wen] If you want local auth artifacts afterward, run: npm run prototype:psplus -- login --capture-artifacts');
 
@@ -386,8 +516,10 @@ async function cmdLogin(parsed: ParsedArgs) {
       }
     }
     console.log('[ps-wen] Wait window complete.');
-    console.log('[ps-wen] If you want to continue with local artifact capture later, run: npm run prototype:psplus -- login --capture-artifacts');
   }
+
+  console.log('[ps-wen] When browser login looks complete, confirm it with:');
+  console.log('npm run prototype:psplus -- confirm-login --note "browser session ready"');
 }
 
 async function main() {
@@ -396,6 +528,8 @@ async function main() {
 
   if (parsed.command === 'status') return cmdStatus(parsed);
   if (parsed.command === 'login') return cmdLogin(parsed);
+  if (parsed.command === 'confirm-login') return cmdConfirmLogin(parsed);
+  if (parsed.command === 'reset-flow') return cmdResetFlow(parsed);
   if (parsed.command === 'bootstrap') return cmdBootstrap();
   if (parsed.command === 'entitlements') return cmdEntitlements();
   if (parsed.command === 'allocate') return cmdAllocate(parsed);
