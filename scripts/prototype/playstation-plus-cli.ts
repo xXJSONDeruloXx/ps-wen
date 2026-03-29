@@ -72,6 +72,20 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { command, positional, flags };
 }
 
+function parseWaitSeconds(flags: ParsedArgs['flags']): number | null {
+  const raw = flags['wait-seconds'];
+  if (!raw || raw === true) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid --wait-seconds value: ${String(raw)}`);
+  }
+  return Math.floor(parsed);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function readJsonIfExists<T>(filePath: string): Promise<T | null> {
   try {
     return JSON.parse(await fs.readFile(filePath, 'utf8')) as T;
@@ -321,6 +335,7 @@ async function runFirstWorkingSpawnSpec(specs: Array<{ command: string; args: st
 
 async function cmdLogin(parsed: ParsedArgs) {
   const captureArtifacts = Boolean(parsed.flags['capture-artifacts']);
+  const waitSeconds = parseWaitSeconds(parsed.flags);
 
   if (captureArtifacts) {
     const spec = buildLoginCaptureSpawnSpec(parsed);
@@ -357,6 +372,22 @@ async function cmdLogin(parsed: ParsedArgs) {
   console.log(`[ps-wen] Launcher: ${usedSpec.command}`);
   console.log('[ps-wen] This system-browser mode does not capture cookies or storage artifacts.');
   console.log('[ps-wen] If you want local auth artifacts afterward, run: npm run prototype:psplus -- login --capture-artifacts');
+
+  if (waitSeconds && waitSeconds > 0) {
+    console.log(`[ps-wen] Waiting ${waitSeconds} seconds while you complete login in the browser...`);
+    const checkpointStep = waitSeconds >= 120 ? 30 : 10;
+    let remaining = waitSeconds;
+    while (remaining > 0) {
+      const chunk = Math.min(checkpointStep, remaining);
+      await sleep(chunk * 1000);
+      remaining -= chunk;
+      if (remaining > 0) {
+        console.log(`[ps-wen] ${remaining}s remaining...`);
+      }
+    }
+    console.log('[ps-wen] Wait window complete.');
+    console.log('[ps-wen] If you want to continue with local artifact capture later, run: npm run prototype:psplus -- login --capture-artifacts');
+  }
 }
 
 async function main() {
