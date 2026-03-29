@@ -19,6 +19,7 @@
 | Safari normalized endpoint report | `npm run auth:safari-endpoints` | redacted host/path/query-key inventory | Ready when Safari summary exists |
 | Browser-session API probe | `npm run api:playstation-web -- probe` | local API probe report under `artifacts/api/` | Ready |
 | Browser-session API probe summary | `npm run api:playstation-web-summary` | classification summary under `artifacts/api/` | Ready after probe run |
+| Bundle GraphQL document extraction | `npm run research:graphql-docs` | extracted GraphQL docs + probe correlation under `artifacts/public/` | Ready |
 | Post-login page reachability | `PSN_POST_LOGIN_URL=... npm run test:psn-login` | page title, screenshot, storage state | Login surface known; assertion still evolving |
 
 ## Phase 2 — official client archaeology

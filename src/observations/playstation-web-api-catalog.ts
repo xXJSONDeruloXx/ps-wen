@@ -297,6 +297,26 @@ export const PLAYSTATION_WEB_API_PROBES: WebApiProbe[] = [
       redirect: 'manual'
     },
     notes: 'Observed from the browser login flow; manual redirect probe for the sign-in bootstrap path.'
+  },
+  {
+    id: 'social.quicklinks.en-us',
+    kind: 'json',
+    preferredOrigins: ['https://www.playstation.com/en-us/playstation-network/', 'https://www.playstation.com/en-us/support/'],
+    request: {
+      url: 'https://social.playstation.com/jetstream/quicklinks/en-us.json',
+      method: 'GET'
+    },
+    notes: 'Observed as a first-party JSON bootstrap resource on signed-in PlayStation web surfaces; returns quick-link metadata.'
+  },
+  {
+    id: 'webtoolbar.l10n.en-us',
+    kind: 'json',
+    preferredOrigins: ['https://www.playstation.com/en-us/playstation-network/', 'https://www.playstation.com/en-us/support/'],
+    request: {
+      url: 'https://web-toolbar.playstation.com/assets/l10n/en-us.json',
+      method: 'GET'
+    },
+    notes: 'Observed as a first-party web-toolbar localization/bootstrap JSON resource.'
   }
 ];
 

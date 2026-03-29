@@ -39,6 +39,25 @@ Observed embedded query documents include:
 
 It also contains code paths that write/read `chimera-*` local storage keys for platform variants.
 
+## GraphQL document extraction follow-up
+
+Using `npm run research:graphql-docs`, the public-bundle evidence now resolves into concrete GraphQL documents rather than only loose operation-name hits.
+
+Current offline extraction found:
+- `10` embedded GraphQL operations across the inspected first-party bundles
+- `7` read-only queries
+- `3` mutations
+
+Read-only operations not yet covered by live browser-session probing are currently:
+- `getExperienceId`
+- `getResolvedProduct`
+- `wcaRetrieveWishlist`
+
+Mutation-only operations now clearly identified from bundles are:
+- `backgroundPurchase`
+- `wcaAddItemToStoreWishlist`
+- `wcaRemoveItemFromStoreWishlist`
+
 ## Strong interpretation
 
 ### A. Public bundles still embed meaningful GraphQL/control-plane details
@@ -80,6 +99,7 @@ Interpretation:
 These public bundles are highly useful for:
 - naming current host families
 - mapping query/document terminology
+- separating read-only queries from mutations before any live experiment
 - identifying likely stale versus current surface assumptions
 
 But they do **not** eliminate the need for runtime/native-client evidence when moving toward cloud-stream session startup.

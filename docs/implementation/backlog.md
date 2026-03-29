@@ -42,6 +42,7 @@ Prioritized next steps based on current evidence.
 3. Build controller capability and session diagnostics matrices.
 4. Keep machine-readable observations in `src/observations/playstation-web.ts` aligned with new evidence.
 5. Extend the observation-backed provider prototype so more clean-room logic can develop against cached artifacts instead of live account traffic.
+6. If further live GraphQL probing is needed, derive or otherwise confirm persisted hashes only for the small set of currently unprobed read-only bundle queries (`getExperienceId`, `getResolvedProduct`, `wcaRetrieveWishlist`) before issuing spaced requests.
 
 ## Priority 5 — cloud-stream specific validation
 

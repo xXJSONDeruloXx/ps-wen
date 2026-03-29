@@ -51,6 +51,7 @@ To use PSN credentials for official-login experiments, place them in `.env` afte
 ```bash
 npm run research:public        # fetch public capability pages and normalize findings
 npm run research:web-assets    # inspect first-party web JS/JSON assets referenced by Safari session summary
+npm run research:graphql-docs  # extract embedded GraphQL docs from public first-party bundles and correlate them with probe outcomes
 npm run research:control-plane # synthesize a browser control-plane snapshot from local artifacts
 npm run test:unit              # unit tests for auth/endpoint normalization logic
 npm run test:public            # verify collected public evidence has expected capability signals
@@ -63,6 +64,7 @@ npm run auth:safari-endpoints  # normalize Safari resource URLs into a redacted 
 npm run api:playstation-web -- list
 npm run api:playstation-web -- probe --ids io.user.details,session.redirect.session --delay-ms 4000
 npm run api:playstation-web-summary
+npm run research:graphql-docs
 npm run research:control-plane
 npm run inspect:bundle -- /path/to/app.asar
 npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe

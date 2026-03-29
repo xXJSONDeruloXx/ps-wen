@@ -40,6 +40,8 @@ This is a **browser web-surface** inventory, not a native cloud-streaming protoc
 - `https://web-toolbar.playstation.com/oracle-*.js`
 - `https://web-toolbar.playstation.com/oracle-*.css`
 
+A paced Safari probe also confirmed `web-toolbar.playstation.com/assets/l10n/en-us.json` returns a localization/bootstrap JSON payload (`200`).
+
 The current toolbar bundle also embeds config pointing to:
 - `https://web.np.playstation.com/api/graphql/v1/`
 - `https://web.np.playstation.com/api/session/v1/`
@@ -67,6 +69,12 @@ Observed endpoints:
 - `https://io.playstation.com/user/segments`
 
 These appear on the general PlayStation web pages rather than the Store-only surface.
+
+### `social.playstation.com`
+Observed endpoint:
+- `https://social.playstation.com/jetstream/quicklinks/en-us.json`
+
+A paced Safari probe confirmed this returns a structured quick-links JSON payload (`200`) and behaves like browser bootstrap/navigation content, not a stream-session API.
 
 ### Store implementation clues
 - `store.playstation.com/_next/static/...`
