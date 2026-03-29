@@ -12,6 +12,7 @@
     "research:public": "tsx scripts/public/fetch-official-capabilities.ts",
     "research:web-assets": "tsx scripts/public/inventory-playstation-web-assets.ts",
     "research:graphql-docs": "tsx scripts/public/extract-playstation-graphql-documents.ts",
+    "research:pc-app-assets": "tsx scripts/public/inventory-playstation-plus-pc-app-assets.ts",
     "research:control-plane": "tsx scripts/observations/summarize-playstation-web-control-plane.ts",
     "test:public": "playwright test tests/psplus-public.spec.ts",
     "test:psn-login": "playwright test tests/psn-login-smoke.spec.ts --project=chromium",
