@@ -81,7 +81,7 @@ Steps:
    - macOS/Linux: `CAPTURE_INTERFACE=en0 npm run capture:metadata`
    - Windows (elevated PowerShell required): `npm run capture:metadata:windows`
 3. exercise the official client during the capture window
-4. summarize with `npm run summarize:metadata -- artifacts/network/<file>.pcap` or `.pcapng`
+4. summarize with `npm run summarize:metadata -- artifacts/network/<file>.pcap` or `.pcapng` (`tshark` if present, otherwise the repo's built-in DNS/TLS metadata summarizer)
 5. document observations at the metadata level only
 
 ## 5. Status note rule

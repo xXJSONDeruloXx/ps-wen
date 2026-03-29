@@ -74,7 +74,7 @@ npm run inspect:pc-app         # summarize the installed Windows PlayStation Plu
 npm run auth:pc-app-summary    # write a redacted PC-app auth/storage summary from local Windows artifacts
 npm run capture:metadata       # macOS/Linux tcpdump wrapper for sanctioned traffic metadata capture
 npm run capture:metadata:windows # Windows pktmon-based metadata capture (run from elevated PowerShell)
-npm run summarize:metadata -- artifacts/network/<capture>.pcapng
+npm run summarize:metadata -- artifacts/network/<capture>.pcapng # uses tshark when available, otherwise falls back to the built-in DNS/TLS metadata summarizer
 ```
 
 ## Initial deliverables in this commit series

@@ -13,9 +13,9 @@ if [[ ! -f "$PCAP_FILE" ]]; then
 fi
 
 if ! command -v tshark >/dev/null 2>&1; then
-  echo "tshark is required for pcap summaries." >&2
-  echo "Install Wireshark/tshark, then rerun." >&2
-  exit 1
+  echo "tshark not found; using built-in metadata summarizer." >&2
+  npx tsx scripts/network/summarize-pcapng.ts "$PCAP_FILE"
+  exit $?
 fi
 
 echo "== Endpoints (IP conversations) =="

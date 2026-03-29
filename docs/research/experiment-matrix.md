@@ -35,7 +35,7 @@
 | Experiment | Command | Output | Status |
 |---|---|---|---|
 | Capture local metadata | `CAPTURE_INTERFACE=en0 npm run capture:metadata` | pcap under `artifacts/network/` | Ready |
-| Summarize pcap | `npm run summarize:metadata -- artifacts/network/<file>.pcap` | stdout summary | Ready if `tshark` is installed |
+| Summarize pcap | `npm run summarize:metadata -- artifacts/network/<file>.pcap` | stdout summary + local JSON summary artifact | Ready (`tshark` optional; built-in fallback available) |
 
 ## Phase 4 — synthesis
 
