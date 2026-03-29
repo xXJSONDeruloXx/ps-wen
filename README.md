@@ -70,8 +70,9 @@ npm run inspect:bundle -- /path/to/app.asar
 npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe
 npm run inspect:pc-app         # summarize the installed Windows PlayStation Plus shell + broker surface
 npm run auth:pc-app-summary    # write a redacted PC-app auth/storage summary from local Windows artifacts
-npm run capture:metadata       # local tcpdump wrapper for sanctioned traffic metadata capture
-npm run summarize:metadata -- artifacts/network/<capture>.pcap
+npm run capture:metadata       # macOS/Linux tcpdump wrapper for sanctioned traffic metadata capture
+npm run capture:metadata:windows # Windows pktmon-based metadata capture (run from elevated PowerShell)
+npm run summarize:metadata -- artifacts/network/<capture>.pcapng
 ```
 
 ## Initial deliverables in this commit series

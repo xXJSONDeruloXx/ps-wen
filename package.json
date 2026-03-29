@@ -26,6 +26,7 @@
     "inspect:installer": "tsx scripts/static/inspect-windows-installer.ts",
     "inspect:pc-app": "tsx scripts/static/summarize-playstation-plus-pc.ts",
     "capture:metadata": "bash scripts/network/capture-session-metadata.sh",
+    "capture:metadata:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/network/capture-session-metadata.ps1",
     "summarize:metadata": "bash scripts/network/summarize-pcap.sh"
   },
   "devDependencies": {

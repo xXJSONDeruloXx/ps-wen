@@ -12,7 +12,7 @@ This inventory converts the user-provided preliminary research into repo-local t
 | Historical PS Now measurement paper | Academic | Best packet-level public clue for Sony-era cloud gaming behavior | Medium |
 | Community PSN OAuth docs and libraries | Community | Strong hint for account/session plumbing patterns | Medium |
 | Historical PS Now PC Electron/ASAR findings | Community | Made bundle archaeology a productive path and are now locally confirmed by the installed Windows payload | High |
-| Installed PlayStation Plus 12.5.0 Windows payload summary | Local / generated | Directly confirms Electron/ASAR shell, localhost broker, PS Now app URL, updater URL, and redacted auth-storage surfaces | High |
+| Installed PlayStation Plus 12.5.0 Windows payload summary | Local / generated | Directly confirms Electron/ASAR shell, localhost broker, PS Now app URL, updater URL, redacted auth-storage surfaces, cached asset URLs, and redacted auth-handoff redirect modes | High |
 
 ## Evidence to collect next
 

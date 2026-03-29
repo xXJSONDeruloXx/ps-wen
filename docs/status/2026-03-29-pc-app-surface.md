@@ -161,6 +161,80 @@ Interpretation:
 - the app also carries **fraud / device-risk** web state (`online-metrix`, `eve.account.sony.com`)
 - the app is not just a thin wrapper around the public Store pages we had already inspected
 
+### 5b. The roaming Chromium profile exposes additional PC-app-only surface clues
+
+The roaming `playstation-now` profile also yields cache/storage evidence that is useful even without touching raw token material.
+
+Observed network hint hosts from `Network Persistent State`:
+
+- `https://redirector.gvt1.com`
+- `https://smetrics.aem.playstation.com`
+- `https://static.playstation.com`
+- `https://web.np.playstation.com`
+
+Observed code-cache asset URLs for the current app shell:
+
+- `https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/assets/apollo.js`
+- `https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/assets/js_ex.min.js`
+- `https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/assets/vendor.js`
+
+Observed roaming local-storage origins:
+
+- `https://psnow.playstation.com`
+- `https://my.account.sony.com`
+- `https://skw.eve.account.sony.com`
+
+Observed roaming session-storage origins:
+
+- `https://psnow.playstation.com`
+- `https://my.account.sony.com`
+
+Representative redacted key names recovered from the roaming profile:
+
+- PS Now app origin:
+  - `DUID`
+  - `appVersion`
+  - `isOfValidAge`
+  - `privacyLevel-<hash>`
+  - `modernizr`
+- Sony account origin:
+  - `!telemetry-web!identifier-session-id`
+  - `!telemetry-web!identifier-short-term-id`
+  - `__ls_config_flags`
+  - `ak_bm_tab_id` (session storage)
+
+This is the first strong local sign that the PC app still carries a hybrid of:
+- PS Now app shell state
+- Sony account web state
+- telemetry / fraud / risk state
+- browser-like cache state that can preserve auth handoff evidence
+
+### 5c. Cached auth handoff redirects are directly observable, even when values are redacted
+
+The roaming cache contains multiple cached `grc-response.html` redirect shapes under the live app URL.
+
+Redacted redirect modes observed:
+
+- **authorization-code style** redirect with query keys:
+  - `cid`
+  - `code`
+- **access-token style** redirect with fragment keys:
+  - `access_token`
+  - `token_type`
+  - `expires_in`
+  - `cid`
+- additional **error-mode** redirects with query keys such as:
+  - `error`
+  - `error_code`
+  - `error_description`
+  - `no_captcha`
+
+Interpretation:
+
+- the PC app auth flow is not just cookie-based; cached redirect handoff pages are part of the live auth/session bootstrap path
+- the app surface preserves enough evidence to classify the handoff mode **without exporting the raw bearer material**
+- the same cached redirect family also helps explain why the app can differ materially from the Store/browser session model
+
 ### 6. The updater still points at PS Now-branded metadata
 
 `unidater.ini` contains:
@@ -190,7 +264,9 @@ The Windows PC app surface is now much clearer:
 2. **Frontend URL**: `https://psnow.playstation.com/app/...`
 3. **Native broker**: `pspluslauncher.exe` on `ws://localhost:1235/`
 4. **Auth substrate**: local Chromium/QtWebEngine cookies, local storage, IndexedDB, and Sony-account / risk-orchestration web state
-5. **Session/stream control hooks**: exposed through the preload bridge, not through the public Store GraphQL surface
+5. **Cached auth handoff**: both authorization-code and access-token style `grc-response.html` redirects are observable in the local cache when summarized redacted
+6. **Asset/control hints**: the current shell caches `apollo.js`, `vendor.js`, `js_ex.min.js`, and remembers hosts such as `web.np.playstation.com`, `static.playstation.com`, and `smetrics.aem.playstation.com`
+7. **Session/stream control hooks**: exposed through the preload bridge, not through the public Store GraphQL surface alone
 
 ## What this rules in / rules out
 

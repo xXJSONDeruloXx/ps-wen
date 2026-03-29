@@ -22,6 +22,8 @@ const EnvSchema = z.object({
   CAPTURE_INTERFACE: z.string().optional(),
   CAPTURE_DURATION: z.string().optional(),
   CAPTURE_FILTER: z.string().optional(),
+  CAPTURE_FILE_SIZE_MB: z.string().optional(),
+  CAPTURE_WINDOWS_PORTS: z.string().optional(),
   HEADLESS: z.string().optional(),
   SAVE_HTML: z.string().optional()
 });
