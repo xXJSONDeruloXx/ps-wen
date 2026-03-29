@@ -5,6 +5,7 @@
 | Experiment | Command | Output | Status |
 |---|---|---|---|
 | Collect official public pages | `npm run research:public` | `artifacts/official-capabilities.json` + raw HTML | Ready |
+| Unit tests for normalization/model logic | `npm run test:unit` | node test output | Ready |
 | Public page smoke test | `npm run test:public` | Playwright report / console output | Ready |
 
 ## Phase 1 — official-login validation

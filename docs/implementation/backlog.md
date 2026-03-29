@@ -33,13 +33,14 @@ Prioritized next steps based on current evidence.
 
 ## Priority 4 — generic OSS implementation prep
 
-1. Define provider interfaces for:
+1. Expand the provider interfaces already started in `src/architecture/provider-types.ts` for:
    - identity bootstrap
    - profile/catalog queries
    - entitlements
    - session allocation
 2. Start a minimal thin-client telemetry schema.
 3. Build controller capability and session diagnostics matrices.
+4. Keep machine-readable observations in `src/observations/playstation-web.ts` aligned with new evidence.
 
 ## Priority 5 — cloud-stream specific validation
 

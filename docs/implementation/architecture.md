@@ -58,6 +58,7 @@ Build a reusable thin-client stack whose generic parts can be developed and test
 3. transport abstraction interface
 4. controller capability matrix
 5. telemetry schema and artifact format
+6. provider contracts (`src/architecture/provider-types.ts`) and machine-readable web observations (`src/observations/playstation-web.ts`)
 
 ## Open architecture questions
 

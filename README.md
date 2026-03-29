@@ -25,10 +25,11 @@ This repo is **not** for:
 ## Repo layout
 
 - `docs/` — organized research, architecture notes, experiment plans, status logs
+- `src/` — machine-readable observations and clean-room provider contracts
 - `scripts/public/` — public-source collection and normalization
 - `scripts/static/` — static inspection helpers for local official client artifacts
 - `scripts/network/` — local metadata capture helpers for sanctioned experiments on your own device/account
-- `tests/` — Playwright smoke tests for public pages and official-login harnesses
+- `tests/` — Playwright smoke tests and unit tests
 - `artifacts/` — generated outputs kept local and ignored by git
 
 ## Quick start
@@ -49,6 +50,7 @@ To use PSN credentials for official-login experiments, place them in `.env` afte
 
 ```bash
 npm run research:public        # fetch public capability pages and normalize findings
+npm run test:unit              # unit tests for auth/endpoint normalization logic
 npm run test:public            # verify collected public evidence has expected capability signals
 npm run env:check              # show readiness for login, bundle, and capture workflows
 npm run test:psn-login         # official login smoke harness using Playwright

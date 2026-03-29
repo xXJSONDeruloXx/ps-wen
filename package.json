@@ -6,7 +6,8 @@
   "description": "Research harness for PlayStation cloud streaming capability validation and clean-room implementation planning.",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
-    "check": "npm run build && npm run research:public && npm run test:public",
+    "test:unit": "tsx --test tests/unit/**/*.test.ts",
+    "check": "npm run build && npm run test:unit && npm run research:public && npm run test:public",
     "env:check": "tsx scripts/validate-env.ts",
     "research:public": "tsx scripts/public/fetch-official-capabilities.ts",
     "test:public": "playwright test tests/psplus-public.spec.ts",
