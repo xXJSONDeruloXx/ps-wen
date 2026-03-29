@@ -5,6 +5,7 @@ import {
   summarizePlaystationWebControlPlane,
   toAccountSessionSnapshot,
   type AssetInventoryArtifact,
+  type GraphqlDocumentReportArtifact,
   type ProbeReportArtifact,
   type ProbeSummaryArtifact,
   type SafariSessionSummaryArtifact
@@ -154,6 +155,45 @@ function makeAssetInventory(): AssetInventoryArtifact {
   };
 }
 
+function makeGraphqlDocumentReport(): GraphqlDocumentReportArtifact {
+  return {
+    generatedAt: '2026-03-29T00:08:00.000Z',
+    operations: [
+      {
+        operationType: 'query',
+        operationName: 'getProfileOracle',
+        readOnly: true,
+        rootFields: ['oracleUserProfileRetrieve'],
+        sourceUrls: ['https://web-toolbar.playstation.com/oracle.js'],
+        probeIds: ['graphql.getProfileOracle'],
+        classifications: ['schema-drift']
+      },
+      {
+        operationType: 'query',
+        operationName: 'wcaRetrieveWishlist',
+        readOnly: true,
+        rootFields: ['storeWishlist'],
+        sourceUrls: ['https://static.playstation.com/wca/v2/js/common.js'],
+        probeIds: [],
+        classifications: []
+      },
+      {
+        operationType: 'mutation',
+        operationName: 'wcaAddItemToStoreWishlist',
+        readOnly: false,
+        rootFields: ['storeWishlistAddItem'],
+        sourceUrls: ['https://static.playstation.com/wca/v2/js/common.js'],
+        probeIds: [],
+        classifications: []
+      }
+    ],
+    summary: {
+      unprobedReadOnlyOperations: ['wcaRetrieveWishlist'],
+      mutationOperations: ['wcaAddItemToStoreWishlist']
+    }
+  };
+}
+
 test('session snapshots preserve strong browser markers despite noisy sign-in prompt copy', () => {
   const safari = makeSafariSessionSummary();
   const snapshot = toAccountSessionSnapshot(safari.summaries[0].summary, safari.generatedAt);
@@ -169,7 +209,8 @@ test('control-plane summary derives capability states from cached artifacts', ()
     safariSessionSummary: makeSafariSessionSummary(),
     probeReport: makeProbeReport(),
     probeSummary: makeProbeSummary(),
-    assetInventory: makeAssetInventory()
+    assetInventory: makeAssetInventory(),
+    graphqlDocumentReport: makeGraphqlDocumentReport()
   });
 
   assert.equal(summary.primarySession?.signedIn, true);
@@ -179,7 +220,11 @@ test('control-plane summary derives capability states from cached artifacts', ()
   assert.equal(summary.capabilities.entitlements.status, 'gated');
   assert.equal(summary.capabilities.sessionBootstrap.status, 'observed');
   assert.deepEqual(summary.hosts.controlPlane, ['io.playstation.com', 'web-toolbar.playstation.com', 'web.np.playstation.com']);
-  assert.deepEqual(summary.graphqlOperations.fromBundles, ['getProfileOracle', 'getSubscriptionInfo', 'queryOracleUserProfileFullSubscription']);
+  assert.deepEqual(summary.hosts.firstPartyOtherPatterns, []);
+  assert.deepEqual(summary.graphqlOperations.fromAssetMatches, ['getProfileOracle', 'getSubscriptionInfo', 'queryOracleUserProfileFullSubscription']);
+  assert.deepEqual(summary.graphqlOperations.extractedQueries, ['getProfileOracle', 'wcaRetrieveWishlist']);
+  assert.deepEqual(summary.graphqlOperations.extractedMutations, ['wcaAddItemToStoreWishlist']);
+  assert.deepEqual(summary.graphqlOperations.unprobedReadOnly, ['wcaRetrieveWishlist']);
 });
 
 test('observation-backed provider exposes cached profile bootstrap and query outcomes', async () => {

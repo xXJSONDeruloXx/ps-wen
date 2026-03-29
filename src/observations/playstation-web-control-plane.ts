@@ -83,6 +83,23 @@ export type AssetInventoryArtifact = {
   }>;
 };
 
+export type GraphqlDocumentReportArtifact = {
+  generatedAt: string;
+  operations: Array<{
+    operationType: 'query' | 'mutation' | 'subscription';
+    operationName: string;
+    readOnly: boolean;
+    rootFields: string[];
+    sourceUrls: string[];
+    probeIds: string[];
+    classifications: string[];
+  }>;
+  summary: {
+    unprobedReadOnlyOperations: string[];
+    mutationOperations: string[];
+  };
+};
+
 export type CapabilityStatus = 'observed' | 'partial' | 'gated' | 'unknown';
 
 export type ControlPlaneCapability = {
@@ -106,6 +123,7 @@ export type PlayStationWebControlPlaneSnapshot = {
     probeReport: string;
     probeSummary?: string;
     assetInventory: string;
+    graphqlDocumentReport?: string;
   };
   primarySession: AccountSessionSnapshot | null;
   observedSurfaces: ObservedWebSurface[];
@@ -113,10 +131,14 @@ export type PlayStationWebControlPlaneSnapshot = {
     controlPlane: string[];
     telemetry: string[];
     firstPartyOther: string[];
+    firstPartyOtherPatterns: string[];
   };
   probeOutcomes: Record<ProbeClassification, string[]>;
   graphqlOperations: {
-    fromBundles: string[];
+    fromAssetMatches: string[];
+    extractedQueries: string[];
+    extractedMutations: string[];
+    unprobedReadOnly: string[];
   };
   capabilities: {
     identityBootstrap: ControlPlaneCapability;
@@ -292,6 +314,10 @@ function isFirstPartyHost(hostname: string): boolean {
   );
 }
 
+function isHostPattern(hostname: string): boolean {
+  return hostname.includes('{') || hostname.includes('}') || hostname.includes('\\');
+}
+
 function collectObservedHostnames(
   safariSessionSummary: SafariSessionSummaryArtifact,
   assetInventory: AssetInventoryArtifact
@@ -317,6 +343,7 @@ export function summarizePlaystationWebControlPlane(input: {
   probeReport: ProbeReportArtifact;
   probeSummary?: ProbeSummaryArtifact;
   assetInventory: AssetInventoryArtifact;
+  graphqlDocumentReport?: GraphqlDocumentReportArtifact;
 }): PlayStationWebControlPlaneSnapshot {
   const observedSurfaces = input.safariSessionSummary.summaries
     .map((entry) => ({
@@ -336,11 +363,27 @@ export function summarizePlaystationWebControlPlane(input: {
   const probeOutcomes = deriveProbeOutcomes(input.probeReport, input.probeSummary);
   const observedHostnames = collectObservedHostnames(input.safariSessionSummary, input.assetInventory);
   const bundleOperations = uniqueSorted(input.assetInventory.assets.flatMap((asset) => asset.graphqlOperationMatches ?? []));
+  const extractedQueries = uniqueSorted(
+    (input.graphqlDocumentReport?.operations ?? [])
+      .filter((operation) => operation.operationType === 'query')
+      .map((operation) => operation.operationName)
+  );
+  const extractedMutations = uniqueSorted(
+    (input.graphqlDocumentReport?.operations ?? [])
+      .filter((operation) => operation.operationType === 'mutation')
+      .map((operation) => operation.operationName)
+  );
+  const unprobedReadOnly = uniqueSorted(input.graphqlDocumentReport?.summary.unprobedReadOnlyOperations ?? []);
 
   const controlPlaneHosts = observedHostnames.filter((hostname) => CONTROL_PLANE_HOST_SET.has(hostname));
   const telemetryHosts = observedHostnames.filter((hostname) => TELEMETRY_HOST_SET.has(hostname));
   const firstPartyOtherHosts = observedHostnames.filter(
-    (hostname) => isFirstPartyHost(hostname) && !CONTROL_PLANE_HOST_SET.has(hostname) && !TELEMETRY_HOST_SET.has(hostname)
+    (hostname) =>
+      isFirstPartyHost(hostname) && !isHostPattern(hostname) && !CONTROL_PLANE_HOST_SET.has(hostname) && !TELEMETRY_HOST_SET.has(hostname)
+  );
+  const firstPartyOtherPatterns = observedHostnames.filter(
+    (hostname) =>
+      isFirstPartyHost(hostname) && isHostPattern(hostname) && !CONTROL_PLANE_HOST_SET.has(hostname) && !TELEMETRY_HOST_SET.has(hostname)
   );
 
   const identityBootstrap = makeCapability(
@@ -401,18 +444,23 @@ export function summarizePlaystationWebControlPlane(input: {
       safariSessionSummary: input.safariSessionSummary.generatedAt,
       probeReport: input.probeReport.generatedAt,
       probeSummary: input.probeSummary?.generatedAt,
-      assetInventory: input.assetInventory.generatedAt
+      assetInventory: input.assetInventory.generatedAt,
+      graphqlDocumentReport: input.graphqlDocumentReport?.generatedAt
     },
     primarySession,
     observedSurfaces,
     hosts: {
       controlPlane: controlPlaneHosts,
       telemetry: telemetryHosts,
-      firstPartyOther: firstPartyOtherHosts
+      firstPartyOther: firstPartyOtherHosts,
+      firstPartyOtherPatterns
     },
     probeOutcomes,
     graphqlOperations: {
-      fromBundles: bundleOperations
+      fromAssetMatches: bundleOperations,
+      extractedQueries,
+      extractedMutations,
+      unprobedReadOnly
     },
     capabilities: {
       identityBootstrap,
@@ -425,6 +473,11 @@ export function summarizePlaystationWebControlPlane(input: {
     recommendations: [
       'Prefer offline artifact synthesis and cached summaries before issuing any new authenticated requests.',
       'When live probing is necessary, keep to the observed allowlist and space requests out by several seconds.',
+      ...(unprobedReadOnly.length > 0
+        ? [
+            `If more GraphQL validation is needed, prioritize the small read-only bundle query set: ${unprobedReadOnly.join(', ')}.`
+          ]
+        : []),
       'Use the observation-backed provider prototype to shape clean-room control-plane interfaces before any native-client work.'
     ]
   };

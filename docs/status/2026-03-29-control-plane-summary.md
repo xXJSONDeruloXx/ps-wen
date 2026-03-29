@@ -19,10 +19,11 @@ The new summary script combines:
 - Safari signed-in session evidence
 - browser-session probe results
 - public web bundle inventory
+- extracted bundle GraphQL documents
 
 into one machine-readable view of what is currently known about the PlayStation web control plane.
 
-### 2. Capability-state framing
+### 2. Capability-state framing and cleaner bundle interpretation
 The snapshot now explicitly classifies these browser-side control-plane areas:
 - identity bootstrap
 - profile bootstrap
@@ -32,6 +33,11 @@ The snapshot now explicitly classifies these browser-side control-plane areas:
 - session allocation
 
 This helps keep implementation planning grounded in evidence instead of broad speculation.
+
+The snapshot now also separates:
+- concrete first-party hosts from template/pattern hostnames embedded in bundles
+- read-only bundle GraphQL queries from mutation operations
+- the small set of currently unprobed read-only bundle queries
 
 ### 3. A read-only provider prototype
 `src/providers/playstation-web-observation-provider.ts` now implements provider interfaces against cached local artifacts.
@@ -52,6 +58,7 @@ The browser-side control plane is now concrete enough to prototype around **offl
 - session redirects are observed
 - GraphQL/query reuse is only partial
 - entitlement-style queries are present but gated
+- bundle extraction currently leaves only a small read-only query tail (`getExperienceId`, `getResolvedProduct`, `wcaRetrieveWishlist`) for any future live validation
 - stream allocation remains unknown
 
 ## Account-safety note
