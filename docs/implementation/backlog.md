@@ -11,7 +11,7 @@ Prioritized next steps based on current evidence.
    - code-cache asset URLs (`apollo.js`, `vendor.js`, `js_ex.min.js`)
    - redacted `grc-response.html` handoff modes
    - roaming local/session-storage origin-key maps
-3. Keep `npm run research:pc-app-assets` current when the app URL/build changes so the repo tracks the live public JS bundle surface.
+3. Keep `npm run research:pc-app-assets` and `npm run research:pc-app-apollo` current when the app URL/build changes so the repo tracks the live public JS bundle surface and structured endpoint/config hints.
 4. Run a short metadata-only capture while the logged-in PC app is idle, then again during any real cloud-stream launch path that is available.
 5. Compare capture hostnames against the newly observed native-client surfaces:
    - `psnow.playstation.com`
