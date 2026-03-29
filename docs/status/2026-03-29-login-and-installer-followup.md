@@ -39,13 +39,17 @@ objdump -x ~/Downloads/PlayStationPlus-12.5.0.exe
 ### Direct observations
 
 - The download is a **32-bit Windows PE installer** labeled `PlayStation Plus Installer` version `12.5.0.0`.
-- A first-pass string and archive sweep suggests an **installer stub** rather than the full runtime app.
-- Embedded clues include:
-  - `+nsiS` → consistent with **NSIS-style** packaging signals
-  - a Chromium **Media Internals** HTML resource extracted during a partial archive pass
-- The installer stub itself did **not** immediately expose high-value runtime strings like `kamaji`, `psnow`, `auth.api.sony...`, or `app.asar`.
+- A first-pass string and archive sweep shows an **installer/bootstrapper**, not the runtime app itself.
+- Stronger packaging clues now point to a **WiX Burn bootstrapper with Advanced Installer-branded/custom UX components**.
+- Embedded payload-name strings indicate internal bundled artifacts such as:
+  - `49F2978\\FILES.7z`
+  - `49F2978\\PlayStationPlus.7z`
+  - `PlayStationPlus-12.5.0.ini`
+  - `vcredist_x86.exe`
+- A 7z signature exists in the image, but direct carving on macOS did not trivially extract a usable archive.
+- The bootstrapper still did **not** immediately expose high-value runtime strings like `kamaji`, `psnow`, `auth.api.sony...`, or `app.asar`.
 
 ### What changed
 
-- We now have a concrete official PC installer artifact and hash.
-- Next best target is the **installed payload or unpacked app directory**, not the stub alone.
+- We now have a concrete official PC installer artifact, hash, and a stronger theory about the installer technology.
+- Next best target is the **installed payload or unpacked app directory**, not the bootstrapper alone.

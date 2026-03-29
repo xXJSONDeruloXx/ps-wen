@@ -47,6 +47,18 @@ function unique<T>(items: T[]): T[] {
   return [...new Set(items)];
 }
 
+function findOffsets(buffer: Buffer, needle: Buffer): number[] {
+  const offsets: number[] = [];
+  let start = 0;
+  while (start < buffer.length) {
+    const index = buffer.indexOf(needle, start);
+    if (index === -1) break;
+    offsets.push(index);
+    start = index + 1;
+  }
+  return offsets;
+}
+
 async function runCommand(command: string, args: string[]) {
   try {
     const { stdout, stderr } = await execFileAsync(command, args, { maxBuffer: 10 * 1024 * 1024 });
@@ -76,6 +88,14 @@ async function main() {
     'nsiS',
     'NSIS',
     'Nullsoft',
+    'WixBundleOriginalSource',
+    'WixBundleName',
+    'BootstrapperApplicationCreate',
+    'WiX Toolset Bootstrapper',
+    'burn',
+    'Advanced Installer',
+    'Caphyon',
+    'AI_BOOTSTRAPPERLANGS',
     'Chromium',
     'Media Internals',
     'Electron',
@@ -117,6 +137,22 @@ async function main() {
   const dllNames = Array.from(objdump.stdout.matchAll(/DLL Name:\s+([^\r\n]+)/g)).map((match) => match[1]);
 
   const nsisMagicPresent = buffer.includes(Buffer.from('nsiS'));
+  const wixBurnPresent = combinedStrings.some((value) => /wixbundleoriginalsource|bootstrapperapplicationcreate|wix toolset bootstrapper|\.wixburn/i.test(value));
+  const advancedInstallerPresent = combinedStrings.some((value) => /advanced installer|caphyon|ai_bootstrapperlangs|advinst_/i.test(value));
+  const sevenZipOffsets = findOffsets(buffer, Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]));
+  const embeddedPayloadNames = unique(
+    combinedStrings.flatMap((value) =>
+      Array.from(
+        value.matchAll(/(?:[A-Za-z0-9_.-]+\\)?[A-Za-z0-9_.-]+\.(?:7z|ini|exe|dll)/gi),
+        (match) => match[0]
+      )
+    )
+  )
+    .filter((value) => /(PlayStationPlus|FILES\.7z|vcredist_x86\.exe|decoder\.dll|\b\d{4}\.dll\b)/i.test(value))
+    .slice(0, 40);
+  const bundleVariableNames = combinedStrings
+    .filter((value) => /^(WixBundle|BundleVersion|BundleTag|DisplayName|burn\.)/i.test(value))
+    .slice(0, 60);
 
   const result = {
     generatedAt: new Date().toISOString(),
@@ -125,9 +161,23 @@ async function main() {
     sha256,
     fileInfo: fileInfo.stdout.trim(),
     versionMetadata,
+    packagingHints: {
+      wixBurnPresent,
+      advancedInstallerPresent,
+      nsisMagicPresent,
+      hybridInterpretation:
+        wixBurnPresent && advancedInstallerPresent
+          ? 'Likely WiX Burn bootstrapper with Advanced Installer-branded/custom UX components.'
+          : wixBurnPresent
+            ? 'Likely WiX Burn bootstrapper.'
+            : advancedInstallerPresent
+              ? 'Likely Advanced Installer bootstrapper.'
+              : 'Packaging technology not confidently identified.'
+    },
     overlayHints: {
       sevenZipSawNsisMagic: nsisMagicPresent || Boolean(keywordHits['nsiS']?.length || keywordHits['NSIS']?.length || keywordHits['Nullsoft']?.length),
-      sevenZipWarnings: sevenZipText.split('\n').filter((line) => /warning|error|data after the end of archive|crc/i.test(line)).slice(0, 20)
+      sevenZipWarnings: sevenZipText.split('\n').filter((line) => /warning|error|data after the end of archive|crc/i.test(line)).slice(0, 20),
+      sevenZipSignatureOffsets: sevenZipOffsets
     },
     urls,
     keywordHits: {
@@ -135,8 +185,12 @@ async function main() {
       nsiS: nsisMagicPresent ? ['raw-byte-signature-present'] : keywordHits['nsiS']
     },
     importedDlls: dllNames,
+    embeddedPayloadNames,
+    bundleVariableNames,
     notes: [
       'Installer metadata alone does not prove the runtime client stack.',
+      'This installer appears to include WiX Burn-style bundle machinery plus Advanced Installer-branded UX/resources.',
+      'Embedded payload-name strings indicate additional archives/executables exist inside the installer even if they are not trivially extracted on macOS.',
       'Prefer installed-app inspection next if the goal is Electron/Chromium/client archaeology.'
     ]
   };

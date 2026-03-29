@@ -13,26 +13,43 @@
   - File version: `12.5.0.0`
   - Copyright year in metadata: `2025`
 
-## What the first pass shows
+## What the deeper pass shows
 
-1. This file is an **installer stub**, not obviously the main app payload itself.
+1. This file is still clearly an **installer/bootstrapper**, not the runtime app itself.
 2. The stub is **32-bit PE/COFF** even though the eventual installed app may or may not be 32-bit.
-3. Archive tooling sees:
-   - a PE image with an overlay/payload region
-   - a strong **NSIS** clue from embedded string `+nsiS`
-   - a nested resource that extracts to Chromium's **Media Internals** HTML page (`[0]~`), which implies Chromium-related assets are present somewhere in the installer resource set
-4. A simple ASCII/UTF-16 string sweep did **not** immediately surface high-value service strings like `kamaji`, `psnow`, `auth.api.sony...`, `web.np.playstation...`, `electron`, or `app.asar` in the installer stub itself.
+3. Multiple packaging fingerprints are present at once:
+   - **WiX Burn** indicators such as:
+     - `WixBundleOriginalSource`
+     - `WixBundleName`
+     - `BootstrapperApplicationCreate`
+     - `WiX Toolset Bootstrapper`
+     - `.wixburn`
+   - **Advanced Installer / Caphyon** indicators such as:
+     - `Advanced Installer Enhanced UI`
+     - `Software\Caphyon\Advanced Installer\`
+     - `AI_BOOTSTRAPPERLANGS`
+     - `Advinst_Extract_`
+   - a weak **NSIS**-looking raw magic clue (`+nsiS`) that is now lower-confidence than the WiX/Advanced Installer evidence
+4. Embedded payload-name strings strongly suggest internal bundled artifacts such as:
+   - `49F2978\FILES.7z`
+   - `49F2978\PlayStationPlus.7z`
+   - `PlayStationPlus-12.5.0.ini`
+   - `vcredist_x86.exe`
+   - language/resource DLLs such as `1033`-style / `20xx` / `30xx` DLL names
+5. A 7z signature is present in the installer image at offset `3075240`, but carving it directly on macOS did not yield a trivially openable archive. That implies either additional wrapper/container logic or a nontrivial extraction layout.
+6. The installer stub still did **not** immediately surface high-value runtime strings like `kamaji`, `psnow`, `auth.api.sony...`, `web.np.playstation...`, `electron`, or `app.asar`.
 
-## Low-confidence interpretation
+## Updated interpretation
 
-- The installer may be NSIS or NSIS-like and could be downloading or unpacking the actual app payload later.
-- The presence of Chromium media internals content is consistent with a Chromium/Electron/WebView-style component somewhere in the overall app chain, but the installer stub alone does not prove the shipped client is Electron.
+- The best current read is that this is a **WiX Burn bootstrapper with Advanced Installer-branded/custom UX components** rather than a simple NSIS wrapper.
+- The installer almost certainly carries additional payload archives/executables internally.
+- The presence of a previously extracted Chromium **Media Internals** HTML resource suggests Chromium-related assets are somewhere in the broader installation chain, but the stub still does **not** prove the final app is Electron.
 
 ## Immediate next steps
 
 1. Extract or observe the **installed app contents** rather than relying only on the installer stub.
-2. Run a dedicated metadata script over the installer and save structured JSON.
-3. If available, inspect installation behavior in a Windows VM or Wine/Proton-style environment and capture the unpacked directory tree.
+2. Inspect installation behavior in a Windows VM or Wine/Proton-style environment and capture the unpacked directory tree.
+3. Identify whether `PlayStationPlus.7z` / `FILES.7z` can be recovered directly with a more PE-aware extraction path.
 4. Search the installed app, not just the installer, for:
    - `kamaji`
    - `oauth`
@@ -44,4 +61,4 @@
 
 ## Evidence quality
 
-These notes are strictly **first-pass installer metadata**. They are useful for triage, but not yet enough to characterize the actual runtime app stack.
+These notes are still **bootstrapper-level** rather than runtime-app-level, but they are now strong enough to characterize the installer technology with moderate confidence.

@@ -78,6 +78,9 @@ const safeSummaryJs = `(() => {
   let gpdcUserKeys = [];
   try { gpdcUserKeys = gpdcUserRaw ? Object.keys(JSON.parse(gpdcUserRaw)) : []; } catch (e) {}
   const chimeraKeys = Object.keys(localStorage).filter((key) => key.startsWith('chimera-'));
+  const resourceUrls = performance.getEntriesByType('resource').map((entry) => entry.name);
+  const resourceHostnames = [...new Set(resourceUrls.map((url) => { try { return new URL(url).hostname; } catch (err) { return null; } }).filter(Boolean))].sort();
+  const sampleResourceUrls = resourceUrls.filter((url) => /playstation|sony|api|graphql|toolbar|telemetry|store\.playstation\.com/i.test(url)).slice(0, 80);
   return JSON.stringify({
     url: location.href,
     title: document.title,
@@ -98,7 +101,9 @@ const safeSummaryJs = `(() => {
     gpdcUserPresent: gpdcUserRaw !== null,
     gpdcUserLength: (gpdcUserRaw || '').length,
     gpdcUserKeys,
-    chimeraKeys
+    chimeraKeys,
+    resourceHostnames,
+    sampleResourceUrls
   });
 })()`;
 
