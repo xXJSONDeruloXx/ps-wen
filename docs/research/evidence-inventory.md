@@ -15,6 +15,7 @@ This inventory converts the user-provided preliminary research into repo-local t
 | Installed PlayStation Plus 12.5.0 Windows payload summary | Local / generated | Directly confirms Electron/ASAR shell, localhost broker, PS Now app URL, updater URL, redacted auth-storage surfaces, cached asset URLs, and redacted auth-handoff redirect modes | High |
 | Public PS Plus PC app asset inventory | Public / generated | Fetches the live JS assets for the current app URL and extracts Kamaji, PC Now, Chihiro, account API, and telemetry namespace clues without using private session material | High |
 | Public PS Plus PC Apollo summary | Public / generated | Extracts structured Kamaji config keys, PC user/account endpoint templates, and auth-flow hints from the live `apollo.js` asset | High |
+| Windows pktmon PC-app metadata capture summary | Local / generated | Summarizes DNS/TLS/443 endpoint metadata from sanctioned `pktmon` captures, including the first on-wire confirmation of `psnow.playstation.com` during a real local capture window | High |
 
 ## Evidence to collect next
 
