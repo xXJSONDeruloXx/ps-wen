@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 const envPath = path.resolve(process.cwd(), '.env');
 if (fs.existsSync(envPath)) {
-  dotenv.config({ path: envPath, override: false });
+  dotenv.config({ path: envPath, override: false, quiet: true });
 }
 
 const EnvSchema = z.object({
@@ -26,7 +26,13 @@ const EnvSchema = z.object({
 export type AppEnv = z.infer<typeof EnvSchema>;
 
 export function loadEnv(): AppEnv {
-  return EnvSchema.parse(process.env);
+  const parsed = EnvSchema.parse(process.env);
+  return Object.fromEntries(
+    Object.entries(parsed).map(([key, value]) => [
+      key,
+      typeof value === 'string' && value.trim() === '' ? undefined : value
+    ])
+  ) as AppEnv;
 }
 
 export function toBoolean(value: string | undefined, fallback = false): boolean {

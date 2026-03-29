@@ -26,6 +26,12 @@ async function clickFirst(page: Page, selectors: string[]): Promise<boolean> {
   return true;
 }
 
+async function typeLikeHuman(locator: Locator, value: string): Promise<void> {
+  await locator.click();
+  await locator.clear();
+  await locator.pressSequentially(value, { delay: 35 });
+}
+
 test('official PSN login smoke harness', async ({ page }) => {
   test.skip(!env.PSN_LOGIN_URL || !env.PSN_EMAIL || !env.PSN_PASSWORD, 'Set PSN_LOGIN_URL, PSN_EMAIL, and PSN_PASSWORD in .env.');
 
@@ -41,7 +47,8 @@ test('official PSN login smoke harness', async ({ page }) => {
     'input[id*="signInId"]'
   ]);
   expect(email, 'Could not find an email field on the configured login page.').not.toBeNull();
-  await email!.fill(env.PSN_EMAIL!);
+  await typeLikeHuman(email!, env.PSN_EMAIL!);
+  await email!.press('Tab');
 
   await clickFirst(page, [
     'button:has-text("Next")',
@@ -55,19 +62,29 @@ test('official PSN login smoke harness', async ({ page }) => {
     'input[name="password"]'
   ]);
   expect(password, 'Could not find a password field after submitting email.').not.toBeNull();
-  await password!.fill(env.PSN_PASSWORD!);
+  await typeLikeHuman(password!, env.PSN_PASSWORD!);
+  await password!.press('Tab');
 
-  await clickFirst(page, [
+  const submitButton = await firstVisible(page, [
     'button:has-text("Sign In")',
     'button:has-text("Sign in")',
     'button:has-text("Continue")',
     'input[type="submit"]'
   ]);
+  expect(submitButton, 'Could not find a submit button after entering password.').not.toBeNull();
+
+  try {
+    await expect(submitButton!).toBeEnabled({ timeout: 10_000 });
+    await submitButton!.click();
+  } catch {
+    await password!.press('Enter');
+  }
 
   await page.waitForTimeout(10_000);
 
   if (env.PSN_POST_LOGIN_URL) {
-    await page.goto(env.PSN_POST_LOGIN_URL, { waitUntil: 'networkidle' });
+    await page.goto(env.PSN_POST_LOGIN_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(5_000);
   }
 
   await page.context().storageState({ path: storageStatePath });
@@ -76,4 +93,7 @@ test('official PSN login smoke harness', async ({ page }) => {
   const state = JSON.parse(fs.readFileSync(storageStatePath, 'utf8')) as { cookies: Array<{ domain: string }> };
   const sonyCookies = state.cookies.filter((cookie) => /sony|playstation/i.test(cookie.domain));
   expect(sonyCookies.length).toBeGreaterThan(0);
+
+  const visibleSignInButton = page.getByRole('button', { name: /^sign in$/i }).first();
+  await expect(visibleSignInButton).toBeHidden({ timeout: 10_000 });
 });
