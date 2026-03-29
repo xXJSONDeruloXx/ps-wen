@@ -14,6 +14,7 @@ Build a reusable thin-client stack whose generic parts can be developed and test
 
 ### 2. Control-plane abstractions
 - OAuth-capable auth module
+- web identity bootstrap provider
 - entitlement/catalog provider interface
 - session allocator interface
 - region / quality preference model
@@ -44,6 +45,10 @@ Build a reusable thin-client stack whose generic parts can be developed and test
 
 - The best open-source investment is in layers 2–5 above, not in hardcoding a Sony-specific client.
 - Service-specific glue should remain behind provider interfaces until there is official or clearly authorized documentation for a given surface.
+- Browser evidence now suggests that the web control plane itself separates into at least:
+  - identity/bootstrap (`session`, `userinfo`, `pdcws2`, `pdcsi`, `gpdcUser`, `userId`)
+  - query/data (`web.np.playstation.com/api/graphql/v1/op` persisted queries)
+  - telemetry (`telemetry.api.playstation.com`, `smetrics.aem.playstation.com`)
 - Capability validation should produce concrete requirements for each layer: max resolution, input features, token refresh timing, reconnect behavior, and adaptation strategy.
 
 ## Generic components to prototype first

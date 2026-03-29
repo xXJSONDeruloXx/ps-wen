@@ -11,13 +11,16 @@
 
 | Experiment | Command | Output | Status |
 |---|---|---|---|
-| Official login smoke | `npm run test:psn-login` | local storage state + screenshots on failure | Ready once `.env` is filled |
-| Post-login page reachability | `PSN_POST_LOGIN_URL=... npm run test:psn-login` | page title, screenshot, storage state | Ready once login surface is known |
+| Official login smoke | `npm run test:psn-login` | local storage state + screenshots on failure | Partially validated; still brittle |
+| Headed/manual login capture | `npm run auth:psn-headed` | local auth artifacts under `artifacts/auth/` | Ready |
+| Safari signed-in session summary | `npm run auth:safari-summary` | redacted signed-in web session summary | Ready when Safari dev JS is enabled |
+| Post-login page reachability | `PSN_POST_LOGIN_URL=... npm run test:psn-login` | page title, screenshot, storage state | Login surface known; assertion still evolving |
 
 ## Phase 2 — official client archaeology
 
 | Experiment | Command | Output | Status |
 |---|---|---|---|
+| Inspect Windows installer stub | `npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe` | installer JSON under `artifacts/static/` | Completed on current installer |
 | Scan `.asar` bundle | `npm run inspect:bundle -- /path/to/app.asar` | inventory JSON under `artifacts/static/` | Ready |
 | Scan extracted app directory | `npm run inspect:bundle -- /path/to/extracted-client` | inventory JSON under `artifacts/static/` | Ready |
 
