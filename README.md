@@ -72,7 +72,7 @@ npm run inspect:bundle -- /path/to/app.asar
 npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe
 npm run inspect:pc-app         # summarize the installed Windows PlayStation Plus shell + broker surface
 npm run auth:pc-app-summary    # write a redacted PC-app auth/storage summary from local Windows artifacts
-npm run prototype:psplus -- status       # observation-backed MVP CLI for login/bootstrap/entitlement/placeholder allocation seams
+npm run prototype:psplus -- status       # observation-backed MVP CLI for system-browser login, bootstrap, entitlement, and placeholder allocation seams
 npm run capture:metadata       # macOS/Linux tcpdump wrapper for sanctioned traffic metadata capture
 npm run capture:metadata:windows # Windows pktmon-based metadata capture (run from elevated PowerShell)
 npm run summarize:metadata -- artifacts/network/<capture>.pcapng # uses tshark when available, otherwise falls back to the built-in DNS/TLS metadata summarizer

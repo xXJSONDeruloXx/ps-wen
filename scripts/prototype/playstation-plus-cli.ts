@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { once } from 'node:events';
-import { resolveArtifactPath } from '../lib/env.js';
+import { loadEnv, resolveArtifactPath } from '../lib/env.js';
 import {
   PlayStationPlusObservationProvider,
   type BrowserAuthSummaryArtifact,
@@ -18,6 +18,8 @@ const DEFAULT_PC_AUTH_SUMMARY = 'artifacts/auth/playstation-plus-pc-auth-summary
 const DEFAULT_PC_SURFACE_SUMMARY = 'artifacts/static/playstation-plus-pc-surface.json';
 const DEFAULT_PC_APOLLO_SUMMARY = 'artifacts/public/playstation-plus-pc-apollo-summary.json';
 const DEFAULT_NETWORK_DIR = 'artifacts/network';
+const DEFAULT_PSN_LOGIN_URL =
+  'https://web.np.playstation.com/api/session/v1/signin?redirect_uri=https%3A%2F%2Fstore.playstation.com%2F';
 
 type ParsedArgs = {
   command?: string;
@@ -30,7 +32,8 @@ function usage(): never {
     [
       'Usage:',
       '  npm run prototype:psplus -- status [--json]',
-      '  npm run prototype:psplus -- login [--wait-seconds 300] [--dry-run]',
+      '  npm run prototype:psplus -- login [--dry-run]',
+      '  npm run prototype:psplus -- login --capture-artifacts [--wait-seconds 300] [--dry-run]',
       '  npm run prototype:psplus -- bootstrap',
       '  npm run prototype:psplus -- entitlements',
       '  npm run prototype:psplus -- allocate [--title-id CUSA00001] [--region us] [--quality auto]'
@@ -182,7 +185,12 @@ async function cmdAllocate(parsed: ParsedArgs) {
   console.log(JSON.stringify(allocation, null, 2));
 }
 
-function buildLoginSpawnSpec(parsed: ParsedArgs): {
+function resolveLoginUrl() {
+  const env = loadEnv();
+  return env.PSN_LOGIN_URL || DEFAULT_PSN_LOGIN_URL;
+}
+
+function buildLoginCaptureSpawnSpec(parsed: ParsedArgs): {
   command: string;
   args: string[];
   options: SpawnOptions;
@@ -215,14 +223,47 @@ function buildLoginSpawnSpec(parsed: ParsedArgs): {
   };
 }
 
-async function cmdLogin(parsed: ParsedArgs) {
-  const spec = buildLoginSpawnSpec(parsed);
-  if (parsed.flags['dry-run']) {
-    console.log(JSON.stringify({ command: spec.command, args: spec.args }, null, 2));
-    return;
+function buildSystemBrowserOpenSpec(loginUrl: string): {
+  command: string;
+  args: string[];
+  options: SpawnOptions;
+} {
+  if (process.platform === 'win32') {
+    return {
+      command: process.env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', `start "" "${loginUrl.replace(/"/g, '""')}"`],
+      options: {
+        stdio: 'inherit',
+        env: process.env,
+        shell: false
+      }
+    };
   }
 
-  console.log('[ps-wen] Launching official browser login helper...');
+  if (process.platform === 'darwin') {
+    return {
+      command: 'open',
+      args: [loginUrl],
+      options: {
+        stdio: 'inherit',
+        env: process.env,
+        shell: false
+      }
+    };
+  }
+
+  return {
+    command: 'xdg-open',
+    args: [loginUrl],
+    options: {
+      stdio: 'inherit',
+      env: process.env,
+      shell: false
+    }
+  };
+}
+
+async function runSpawnSpec(spec: { command: string; args: string[]; options: SpawnOptions }) {
   const child = spawn(spec.command, spec.args, spec.options);
 
   const result = await Promise.race([
@@ -235,8 +276,37 @@ async function cmdLogin(parsed: ParsedArgs) {
   }
 
   if (result.code !== 0) {
-    throw new Error(`auth:psn-headed exited with code ${String(result.code)}${result.signal ? ` signal ${result.signal}` : ''}`);
+    throw new Error(`Subprocess exited with code ${String(result.code)}${result.signal ? ` signal ${result.signal}` : ''}`);
   }
+}
+
+async function cmdLogin(parsed: ParsedArgs) {
+  const captureArtifacts = Boolean(parsed.flags['capture-artifacts']);
+
+  if (captureArtifacts) {
+    const spec = buildLoginCaptureSpawnSpec(parsed);
+    if (parsed.flags['dry-run']) {
+      console.log(JSON.stringify({ mode: 'capture-artifacts', command: spec.command, args: spec.args }, null, 2));
+      return;
+    }
+
+    console.log('[ps-wen] Launching official browser login helper with local artifact capture...');
+    await runSpawnSpec(spec);
+    return;
+  }
+
+  const loginUrl = resolveLoginUrl();
+  const spec = buildSystemBrowserOpenSpec(loginUrl);
+  if (parsed.flags['dry-run']) {
+    console.log(JSON.stringify({ mode: 'system-browser', loginUrl, command: spec.command, args: spec.args }, null, 2));
+    return;
+  }
+
+  console.log('[ps-wen] Opening official PlayStation sign-in URL in your default browser...');
+  await runSpawnSpec(spec);
+  console.log(`[ps-wen] Opened: ${loginUrl}`);
+  console.log('[ps-wen] This system-browser mode does not capture cookies or storage artifacts.');
+  console.log('[ps-wen] If you want local auth artifacts afterward, run: npm run prototype:psplus -- login --capture-artifacts');
 }
 
 async function main() {

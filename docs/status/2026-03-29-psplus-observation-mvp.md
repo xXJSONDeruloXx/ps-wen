@@ -8,6 +8,7 @@ npm run prototype:psplus -- bootstrap
 npm run prototype:psplus -- entitlements
 npm run prototype:psplus -- allocate --title-id CUSA00001 --region us --quality 1080p
 npm run prototype:psplus -- login
+npm run prototype:psplus -- login --capture-artifacts --wait-seconds 600
 ```
 
 ## What this is
@@ -70,11 +71,23 @@ Returns a consolidated view of:
 
 ### `login`
 
-This launches the existing official-browser login helper:
+By default, this now opens the official sign-in URL in the user's **system browser**.
+
+That is the more sensible MVP/auth shape for a real client because it:
+
+- uses the user's normal browser profile
+- reuses password manager / passkey / MFA flows
+- avoids making Playwright look like a permanent dependency of the product shape
+
+This default mode intentionally does **not** capture cookies or browser storage.
+
+If local auth artifacts are needed for research, use:
+
+- `npm run prototype:psplus -- login --capture-artifacts`
+
+That path launches the existing Playwright-based headed helper:
 
 - `npm run auth:psn-headed`
-
-So the MVP can initiate login only through the already-allowed official flow.
 
 ### `bootstrap`
 
