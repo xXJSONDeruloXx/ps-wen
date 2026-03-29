@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { once } from 'node:events';
 import { resolveArtifactPath } from '../lib/env.js';
 import {
@@ -30,7 +30,7 @@ function usage(): never {
     [
       'Usage:',
       '  npm run prototype:psplus -- status [--json]',
-      '  npm run prototype:psplus -- login [--wait-seconds 300]',
+      '  npm run prototype:psplus -- login [--wait-seconds 300] [--dry-run]',
       '  npm run prototype:psplus -- bootstrap',
       '  npm run prototype:psplus -- entitlements',
       '  npm run prototype:psplus -- allocate [--title-id CUSA00001] [--region us] [--quality auto]'
@@ -182,23 +182,60 @@ async function cmdAllocate(parsed: ParsedArgs) {
   console.log(JSON.stringify(allocation, null, 2));
 }
 
-async function cmdLogin(parsed: ParsedArgs) {
-  const command = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+function buildLoginSpawnSpec(parsed: ParsedArgs): {
+  command: string;
+  args: string[];
+  options: SpawnOptions;
+} {
   const childEnv = { ...process.env };
   if (typeof parsed.flags['wait-seconds'] === 'string') {
     childEnv.MANUAL_AUTH_WAIT_SECONDS = parsed.flags['wait-seconds'];
   }
 
-  console.log('[ps-wen] Launching official browser login helper...');
-  const child = spawn(command, ['run', 'auth:psn-headed'], {
-    stdio: 'inherit',
-    env: childEnv,
-    shell: false
-  });
+  if (process.platform === 'win32') {
+    return {
+      command: process.env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', 'npm run auth:psn-headed'],
+      options: {
+        stdio: 'inherit',
+        env: childEnv,
+        shell: false
+      }
+    };
+  }
 
-  const [code] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
-  if (code !== 0) {
-    throw new Error(`auth:psn-headed exited with code ${String(code)}`);
+  return {
+    command: 'npm',
+    args: ['run', 'auth:psn-headed'],
+    options: {
+      stdio: 'inherit',
+      env: childEnv,
+      shell: false
+    }
+  };
+}
+
+async function cmdLogin(parsed: ParsedArgs) {
+  const spec = buildLoginSpawnSpec(parsed);
+  if (parsed.flags['dry-run']) {
+    console.log(JSON.stringify({ command: spec.command, args: spec.args }, null, 2));
+    return;
+  }
+
+  console.log('[ps-wen] Launching official browser login helper...');
+  const child = spawn(spec.command, spec.args, spec.options);
+
+  const result = await Promise.race([
+    once(child, 'exit').then(([code, signal]) => ({ code, signal, error: null })),
+    once(child, 'error').then(([error]) => ({ code: null, signal: null, error }))
+  ]);
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.code !== 0) {
+    throw new Error(`auth:psn-headed exited with code ${String(result.code)}${result.signal ? ` signal ${result.signal}` : ''}`);
   }
 }
 
