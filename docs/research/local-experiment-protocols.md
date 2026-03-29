@@ -63,8 +63,12 @@ Steps:
 1. obtain an official client bundle locally
 2. run `npm run inspect:bundle -- /path/to/app.asar`
    or `npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe` for a first-pass Windows installer metadata sweep
-3. inspect JSON output under `artifacts/static/`
-4. summarize any meaningful findings in docs, never commit the proprietary bundle itself
+3. if the installed Windows app is available, also run:
+   - `npm run inspect:pc-app`
+   - `npm run auth:pc-app-summary`
+   - `npm run research:pc-app-assets`
+4. inspect JSON output under `artifacts/static/`, `artifacts/auth/`, and `artifacts/public/`
+5. summarize any meaningful findings in docs, never commit the proprietary bundle itself
 
 ## 4. Network metadata capture
 
