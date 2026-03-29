@@ -6,11 +6,15 @@
 npm run capture:metadata:windows
 npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-164212.pcapng
 npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-165742.pcapng
+$env:CAPTURE_DURATION='1200'
+$env:CAPTURE_FILE_SIZE_MB='1024'
+npm run capture:metadata:windows
+npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-171205.pcapng
 ```
 
 ## What changed
 
-Two sanctioned Windows `pktmon` captures were completed from an elevated PowerShell session and summarized locally.
+Three sanctioned Windows `pktmon` captures were completed from an elevated PowerShell session and summarized locally.
 
 The repo now also has a built-in pcapng metadata summarizer, so capture summaries no longer hard-stop when `tshark` is missing.
 
@@ -22,6 +26,8 @@ Local-only generated artifacts:
 - `artifacts/network/ps-cloud-metadata-20260329-164212.summary.json`
 - `artifacts/network/ps-cloud-metadata-20260329-165742.pcapng`
 - `artifacts/network/ps-cloud-metadata-20260329-165742.summary.json`
+- `artifacts/network/ps-cloud-metadata-20260329-171205.pcapng`
+- `artifacts/network/ps-cloud-metadata-20260329-171205.summary.json`
 
 ## Capture 1: `ps-cloud-metadata-20260329-164212`
 
@@ -77,15 +83,56 @@ It did include a small unlabeled HTTPS conversation to the same IP seen in captu
 
 But because there was no matching DNS/SNI evidence in that run, it is treated only as a weak correlation, not a confirmed PlayStation hostname hit for that second capture.
 
+## Capture 3: `ps-cloud-metadata-20260329-171205`
+
+A wider capture window produced a materially richer PlayStation/Sony surface even without a live Premium stream session.
+
+### Strong signals newly observed on the wire
+
+This run again confirmed:
+
+- `psnow.playstation.com` DNS + TLS SNI
+
+But it also added first local metadata hits for several additional PlayStation/Sony families, including:
+
+- `ca.account.sony.com`
+- `commerce.api.np.km.playstation.net`
+- `download-psnow.playstation.com`
+- `merchandise.api.playstation.com`
+- `web.np.playstation.com`
+- `theia.dl.playstation.net`
+- `cc.prod.gaikai.com`
+- `cdn-a.sonyentertainmentnetwork.com`
+
+The most important new clues are:
+
+- `commerce.api.np.km.playstation.net`
+  - shows a live `km.playstation.net` family on the wire, which matches the broader PS Now / Kamaji-style lineage already inferred from the public app assets
+- `cc.prod.gaikai.com`
+  - gives a fresh local on-wire Gaikai-era hostname hit from the current Windows client
+- `web.np.playstation.com`
+  - confirms the browser/control-plane host seen in cached profile state also appears in sanctioned native-app metadata capture
+
+### What this still does not prove
+
+Even with the wider capture window, this still does **not** prove a real entitled stream path because we still lack:
+
+- queue placement evidence
+- allocator-specific hostnames
+- session bootstrap identifiers from a successful launch
+- live media/transport channel evidence
+
+So the capture improves the control-plane map substantially, but it does not replace a real queue/start observation.
+
 ## Net result
 
 We now have a better-grounded model:
 
 1. **Static/runtime evidence** says the app launches an Electron shell on `https://psnow.playstation.com/app/...`.
 2. **Public JS assets** still expose Kamaji / PC Now / account API structure.
-3. **Live metadata capture** now confirms that `psnow.playstation.com` appears on the wire during actual local app activity.
+3. **Live metadata capture** now confirms on-wire activity for `psnow.playstation.com` plus additional Sony/PlayStation control-plane families such as `ca.account.sony.com`, `commerce.api.np.km.playstation.net`, `web.np.playstation.com`, `download-psnow.playstation.com`, `theia.dl.playstation.net`, and `cc.prod.gaikai.com`.
 
-That materially strengthens the claim that the installed PC client is still anchored to the PS Now / Kamaji-era control-plane family.
+That materially strengthens the claim that the installed PC client is still anchored to the PS Now / Kamaji / Gaikai-era control-plane family.
 
 ## Best next capture
 
