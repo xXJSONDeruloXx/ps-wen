@@ -13,6 +13,7 @@ To keep the research bounded and safer:
 ## Artifacts
 
 - `artifacts/api/playstation-web-probe-report.json`
+- `artifacts/api/playstation-web-probe-summary.json`
 
 ## CLI added
 
@@ -42,7 +43,15 @@ Observed outcomes:
 - `graphql.wcaPlatformVariantsRetrive` → `200` with GraphQL access-denied error in payload
 - `graphql.getPurchasedGameList` → `200` with GraphQL access-denied error in payload
 
-### 3. Two distinct failure modes showed up
+### 3. Probe classifications currently observed
+
+From the current redacted summary:
+- `success`: `2`
+- `schema-drift`: `3`
+- `access-denied`: `3`
+- `direct-query-blocked`: `5`
+
+### 4. Three distinct failure modes showed up
 
 #### A. Schema drift / stale persisted query behavior
 Examples:

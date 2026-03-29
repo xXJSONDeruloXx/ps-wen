@@ -41,8 +41,10 @@ Execution:
    - `npm run auth:safari-summary`
    - `npm run auth:safari-endpoints`
    - `npm run api:playstation-web -- probe`
+   - `npm run api:playstation-web-summary`
    - inspect `artifacts/auth/safari-endpoint-report.json` for normalized host/path/query-key inventories
    - inspect `artifacts/api/playstation-web-probe-report.json` for redacted API probe outcomes
+   - inspect `artifacts/api/playstation-web-probe-summary.json` for classification totals
 5. never commit the storage state or raw auth artifacts
 
 Notes:

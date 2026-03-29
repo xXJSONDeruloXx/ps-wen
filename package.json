@@ -18,6 +18,7 @@
     "auth:safari-summary": "tsx scripts/auth/safari-session-summary.ts",
     "auth:safari-endpoints": "tsx scripts/auth/normalize-safari-endpoints.ts",
     "api:playstation-web": "tsx scripts/api/playstation-web-cli.ts",
+    "api:playstation-web-summary": "tsx scripts/api/summarize-playstation-web-probe.ts",
     "inspect:bundle": "tsx scripts/static/inventory-client-bundle.ts",
     "inspect:installer": "tsx scripts/static/inspect-windows-installer.ts",
     "capture:metadata": "bash scripts/network/capture-session-metadata.sh",

@@ -61,6 +61,7 @@ npm run auth:safari-summary    # summarize Safari PlayStation tabs when JS from 
 npm run auth:safari-endpoints  # normalize Safari resource URLs into a redacted endpoint report
 npm run api:playstation-web -- list
 npm run api:playstation-web -- probe
+npm run api:playstation-web-summary
 npm run inspect:bundle -- /path/to/app.asar
 npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe
 npm run capture:metadata       # local tcpdump wrapper for sanctioned traffic metadata capture
