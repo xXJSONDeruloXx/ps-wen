@@ -83,6 +83,14 @@ This indicates the current Store surface is a Next.js-style app with its own ass
 - `chimera-*` local storage on the Store
 - Store-specific Next.js assets and smetrics naming
 
+## Direct replay note
+
+Browser-session API probing showed that some first-party endpoints can be called directly from the authenticated browser session (`io.playstation.com/user/details`, `io.playstation.com/user/segments`), while many observed GraphQL persisted queries on `web.np.playstation.com` either:
+- fail with schema errors, or
+- return GraphQL access-denied payloads
+
+That means the observed resource URLs are valuable evidence, but they are **not** automatically reusable as a general-purpose API client surface.
+
 ## Why this matters for the implementation path
 
 Even though this repo is targeting a clean-room, non-wrapper path, these browser findings suggest a reusable separation of concerns:
