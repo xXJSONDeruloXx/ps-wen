@@ -56,4 +56,5 @@ This is useful evidence for the **web control plane** because it confirms:
 
 - The headed manual auth helper should accept this full URL directly.
 - The auth summary tooling should record **host/path and key names only**, not raw token-like values.
-- Future native-client comparisons should check whether the same `client_id`, scopes, or redirect hosts appear in PC client artifacts.
+- Safari session inspection confirms that authenticated PlayStation web surfaces expose stable cookie names like `session`, `userinfo`, `pdcws2`, `pdcsi`, and `isSignedIn`, plus page/storage-specific keys such as `gpdcUser`, `userId`, and store `chimera-*` entries.
+- Future native-client comparisons should check whether the same `client_id`, scopes, redirect hosts, cookie names, or storage-key families appear in PC client artifacts.

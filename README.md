@@ -54,6 +54,7 @@ npm run env:check              # show readiness for login, bundle, and capture w
 npm run test:psn-login         # official login smoke harness using Playwright
 npm run auth:psn-headed        # headed/manual login helper that dumps cookies + storage locally
 npm run auth:psn-summary       # create a redacted auth artifact summary from local captures
+npm run auth:safari-summary    # summarize Safari PlayStation tabs when JS from Apple Events is enabled
 npm run inspect:bundle -- /path/to/app.asar
 npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe
 npm run capture:metadata       # local tcpdump wrapper for sanctioned traffic metadata capture

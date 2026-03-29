@@ -11,6 +11,7 @@ const dumpPath = resolveArtifactPath(undefined, 'artifacts/auth/manual-login-dum
 const screenshotPath = resolveArtifactPath(undefined, 'artifacts/auth/manual-login-final.png');
 const waitSeconds = Number(process.env.MANUAL_AUTH_WAIT_SECONDS || '300');
 const timeoutMs = waitSeconds * 1000;
+const autoClose = !['0', 'false', 'no', 'off'].includes((process.env.MANUAL_AUTH_AUTO_CLOSE || 'false').toLowerCase());
 
 async function ensureParent(filePath: string) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -81,6 +82,7 @@ async function main() {
   console.log(`[ps-wen] Login URL: ${loginUrl}`);
   console.log('[ps-wen] Complete sign-in in the browser window.');
   console.log(`[ps-wen] Leave the browser on a post-login page. Capture will occur after up to ${waitSeconds} seconds, or sooner on a stronger auth signal.`);
+  console.log(`[ps-wen] Browser auto-close is ${autoClose ? 'enabled' : 'disabled'} for this run.`);
 
   await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
   await prefillEmail(page, env.PSN_EMAIL);
@@ -161,6 +163,14 @@ async function main() {
   console.log(`[ps-wen] Wrote ${dumpPath}`);
   console.log(`[ps-wen] Wrote ${summaryPath}`);
   console.log(`[ps-wen] Wrote ${screenshotPath}`);
+
+  if (!autoClose) {
+    console.log('[ps-wen] Leaving browser open. Close the browser window when you are done reviewing.');
+    await new Promise<void>((resolve) => {
+      browser.on('disconnected', () => resolve());
+    });
+    return;
+  }
 
   await browser.close();
 }

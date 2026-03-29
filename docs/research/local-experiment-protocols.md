@@ -29,17 +29,21 @@ Execution:
 2. if automation is brittle, use the headed/manual helper: `npm run auth:psn-headed`
    - optional: set `PSN_LOGIN_URL` to a full `my.account.sony.com/sonyacct/signin/...` URL if you want to start from a known-good entry point
    - optional: set `MANUAL_AUTH_WAIT_SECONDS=300` (or longer) to give yourself more time in the browser
+   - optional: set `MANUAL_AUTH_AUTO_CLOSE=false` to keep the manual browser window open after capture until you close it yourself
 3. watch for CAPTCHA / MFA / consent screens
 4. if the run succeeds, inspect:
    - `artifacts/auth/playstation-storage-state.json`
    - `artifacts/auth/manual-login-dump.json`
    - `artifacts/auth/playstation-auth-summary.json`
    - `artifacts/auth/manual-login-final.png`
+5. if Safari already has a good PlayStation session, enable `Allow JavaScript from Apple Events` in Safari's Developer settings and run:
+   - `npm run auth:safari-summary`
 5. never commit the storage state or raw auth artifacts
 
 Notes:
 - this harness is intentionally conservative; it does not try to defeat anti-automation measures
 - the headed helper is meant for user-assisted completion in an official browser flow
+- the Safari summary path is useful when Chromium automation is flaky but Safari already has a valid signed-in session
 - if full login is not stable, record the exact blocker in a status note rather than hacking around it
 
 ## 3. Static client bundle inventory
