@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from '@playwright/test';
 import { loadEnv, resolveArtifactPath } from '../lib/env.js';
+import { writeAuthSummary } from '../lib/auth-summary.js';
 
 const env = loadEnv();
 const loginUrl = env.PSN_LOGIN_URL || 'https://web.np.playstation.com/api/session/v1/signin?redirect_uri=https%3A%2F%2Fstore.playstation.com%2F';
@@ -94,17 +95,22 @@ async function main() {
       (cookie) => /my\.account\.sony\.com/i.test(cookie.domain) || /kp_|token|sess|auth|login/i.test(cookie.name)
     );
     const currentUrl = page.url();
-    const offSignin = !/signin|oauth|login/i.test(currentUrl);
+    const currentUrlLower = currentUrl.toLowerCase();
+    const onSigninSurface = /my\.account\.sony\.com\/sonyacct\/signin|\/signin\b|error=login_required/.test(currentUrlLower);
+    const offSignin = !onSigninSurface;
     let bodyText = '';
     try {
       bodyText = await page.locator('body').innerText({ timeout: 1_000 });
     } catch {
       bodyText = '';
     }
-    const hasSigninPrompt = /sign in to your psn account|create psn account/i.test(bodyText);
-    const strongSignal = authLikeCookies.length > 0 && offSignin && !hasSigninPrompt;
+    const hasSigninPrompt = /sign in to your psn account|create psn account|sign in to playstation/i.test(bodyText);
+    const onKnownPostLoginHost = /store\.playstation\.com|www\.playstation\.com|io\.playstation\.com|web\.np\.playstation\.com/.test(
+      currentUrlLower
+    );
+    const strongSignal = authLikeCookies.length > 0 && offSignin && onKnownPostLoginHost && !hasSigninPrompt;
 
-    if (strongSignal || (sonyCookies.length > 0 && /my\.account\.sony\.com|store\.playstation\.com/i.test(currentUrl) && !hasSigninPrompt)) {
+    if (strongSignal || (sonyCookies.length > 0 && offSignin && onKnownPostLoginHost && !hasSigninPrompt)) {
       detected = true;
       break;
     }
@@ -149,8 +155,11 @@ async function main() {
   };
 
   await fs.writeFile(dumpPath, `${JSON.stringify(dump, null, 2)}\n`, 'utf8');
+  const summaryPath = resolveArtifactPath(undefined, 'artifacts/auth/playstation-auth-summary.json');
+  await writeAuthSummary({ storageStatePath, dumpPath, outputPath: summaryPath });
   console.log(`[ps-wen] Wrote ${storageStatePath}`);
   console.log(`[ps-wen] Wrote ${dumpPath}`);
+  console.log(`[ps-wen] Wrote ${summaryPath}`);
   console.log(`[ps-wen] Wrote ${screenshotPath}`);
 
   await browser.close();

@@ -27,11 +27,13 @@ Prep:
 Execution:
 1. try the automated smoke first: `npm run test:psn-login`
 2. if automation is brittle, use the headed/manual helper: `npm run auth:psn-headed`
+   - optional: set `PSN_LOGIN_URL` to a full `my.account.sony.com/sonyacct/signin/...` URL if you want to start from a known-good entry point
    - optional: set `MANUAL_AUTH_WAIT_SECONDS=300` (or longer) to give yourself more time in the browser
 3. watch for CAPTCHA / MFA / consent screens
 4. if the run succeeds, inspect:
    - `artifacts/auth/playstation-storage-state.json`
    - `artifacts/auth/manual-login-dump.json`
+   - `artifacts/auth/playstation-auth-summary.json`
    - `artifacts/auth/manual-login-final.png`
 5. never commit the storage state or raw auth artifacts
 

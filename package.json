@@ -12,6 +12,7 @@
     "test:public": "playwright test tests/psplus-public.spec.ts",
     "test:psn-login": "playwright test tests/psn-login-smoke.spec.ts --project=chromium",
     "auth:psn-headed": "tsx scripts/auth/manual-psn-login.ts",
+    "auth:psn-summary": "tsx scripts/auth/summarize-capture.ts",
     "inspect:bundle": "tsx scripts/static/inventory-client-bundle.ts",
     "inspect:installer": "tsx scripts/static/inspect-windows-installer.ts",
     "capture:metadata": "bash scripts/network/capture-session-metadata.sh",
