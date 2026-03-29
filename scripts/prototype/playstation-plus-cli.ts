@@ -223,44 +223,68 @@ function buildLoginCaptureSpawnSpec(parsed: ParsedArgs): {
   };
 }
 
-function buildSystemBrowserOpenSpec(loginUrl: string): {
+function buildSystemBrowserOpenSpecs(loginUrl: string): Array<{
   command: string;
   args: string[];
   options: SpawnOptions;
-} {
+}> {
   if (process.platform === 'win32') {
-    return {
-      command: process.env.ComSpec || 'cmd.exe',
-      args: ['/d', '/s', '/c', `start "" "${loginUrl.replace(/"/g, '""')}"`],
-      options: {
-        stdio: 'inherit',
-        env: process.env,
-        shell: false
+    return [
+      {
+        command: 'powershell.exe',
+        args: ['-NoProfile', '-Command', `Start-Process '${loginUrl.replace(/'/g, "''")}'`],
+        options: {
+          stdio: 'inherit',
+          env: process.env,
+          shell: false
+        }
+      },
+      {
+        command: 'rundll32.exe',
+        args: ['url.dll,FileProtocolHandler', loginUrl],
+        options: {
+          stdio: 'inherit',
+          env: process.env,
+          shell: false
+        }
+      },
+      {
+        command: process.env.ComSpec || 'cmd.exe',
+        args: ['/d', '/s', '/c', `start "" "${loginUrl.replace(/"/g, '""')}"`],
+        options: {
+          stdio: 'inherit',
+          env: process.env,
+          shell: false
+        }
       }
-    };
+    ];
   }
 
   if (process.platform === 'darwin') {
-    return {
-      command: 'open',
+    return [
+      {
+        command: 'open',
+        args: [loginUrl],
+        options: {
+          stdio: 'inherit',
+          env: process.env,
+          shell: false
+        }
+      }
+    ];
+  }
+
+  return [
+    {
+      command: 'xdg-open',
       args: [loginUrl],
       options: {
         stdio: 'inherit',
         env: process.env,
         shell: false
       }
-    };
-  }
-
-  return {
-    command: 'xdg-open',
-    args: [loginUrl],
-    options: {
-      stdio: 'inherit',
-      env: process.env,
-      shell: false
     }
-  };
+  ];
 }
 
 async function runSpawnSpec(spec: { command: string; args: string[]; options: SpawnOptions }) {
@@ -280,6 +304,21 @@ async function runSpawnSpec(spec: { command: string; args: string[]; options: Sp
   }
 }
 
+async function runFirstWorkingSpawnSpec(specs: Array<{ command: string; args: string[]; options: SpawnOptions }>) {
+  const errors: string[] = [];
+  for (const spec of specs) {
+    try {
+      await runSpawnSpec(spec);
+      return spec;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${spec.command}: ${message}`);
+    }
+  }
+
+  throw new Error(`Unable to open system browser. Attempts: ${errors.join(' | ')}`);
+}
+
 async function cmdLogin(parsed: ParsedArgs) {
   const captureArtifacts = Boolean(parsed.flags['capture-artifacts']);
 
@@ -296,15 +335,26 @@ async function cmdLogin(parsed: ParsedArgs) {
   }
 
   const loginUrl = resolveLoginUrl();
-  const spec = buildSystemBrowserOpenSpec(loginUrl);
+  const specs = buildSystemBrowserOpenSpecs(loginUrl);
   if (parsed.flags['dry-run']) {
-    console.log(JSON.stringify({ mode: 'system-browser', loginUrl, command: spec.command, args: spec.args }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          mode: 'system-browser',
+          loginUrl,
+          attempts: specs.map((spec) => ({ command: spec.command, args: spec.args }))
+        },
+        null,
+        2
+      )
+    );
     return;
   }
 
   console.log('[ps-wen] Opening official PlayStation sign-in URL in your default browser...');
-  await runSpawnSpec(spec);
+  const usedSpec = await runFirstWorkingSpawnSpec(specs);
   console.log(`[ps-wen] Opened: ${loginUrl}`);
+  console.log(`[ps-wen] Launcher: ${usedSpec.command}`);
   console.log('[ps-wen] This system-browser mode does not capture cookies or storage artifacts.');
   console.log('[ps-wen] If you want local auth artifacts afterward, run: npm run prototype:psplus -- login --capture-artifacts');
 }
