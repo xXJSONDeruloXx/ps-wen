@@ -137,6 +137,29 @@ export const PLAYSTATION_PLUS_PC_NETWORK_HINT_HOSTS = [
   'https://web.np.playstation.com'
 ] as const;
 
+export const PLAYSTATION_PLUS_PC_CAPTURED_METADATA_HOSTS = [
+  'ca.account.sony.com',
+  'cc.prod.gaikai.com',
+  'cdn-a.sonyentertainmentnetwork.com',
+  'checkout.playstation.com',
+  'commerce.api.np.km.playstation.net',
+  'download-psnow.playstation.com',
+  'gmedia.playstation.com',
+  'image.api.playstation.com',
+  'io.playstation.com',
+  'merchandise.api.playstation.com',
+  'psnow.playstation.com',
+  'smetrics.aem.playstation.com',
+  'social.playstation.com',
+  'static.playstation.com',
+  'telemetry.api.playstation.com',
+  'theia.dl.playstation.net',
+  'web-commerce-anywhere.playstation.com',
+  'web-toolbar.playstation.com',
+  'web.np.playstation.com',
+  'www.playstation.com'
+] as const;
+
 export const PLAYSTATION_PLUS_PC_CODE_CACHE_ASSET_URLS = [
   'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/assets/apollo.js',
   'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/assets/js_ex.min.js',
@@ -205,6 +228,7 @@ export type PlaystationPlusPcAuthCookieDomain = (typeof PLAYSTATION_PLUS_PC_AUTH
 export type PlaystationPlusPcLocalStorageKey = (typeof PLAYSTATION_PLUS_PC_LOCAL_STORAGE_KEYS)[number];
 export type PlaystationPlusPcIndexedDbOrigin = (typeof PLAYSTATION_PLUS_PC_INDEXEDDB_ORIGINS)[number];
 export type PlaystationPlusPcNetworkHintHost = (typeof PLAYSTATION_PLUS_PC_NETWORK_HINT_HOSTS)[number];
+export type PlaystationPlusPcCapturedMetadataHost = (typeof PLAYSTATION_PLUS_PC_CAPTURED_METADATA_HOSTS)[number];
 export type PlaystationPlusPcCodeCacheAssetUrl = (typeof PLAYSTATION_PLUS_PC_CODE_CACHE_ASSET_URLS)[number];
 export type PlaystationPlusPcRoamingLocalStorageOrigin = (typeof PLAYSTATION_PLUS_PC_ROAMING_LOCAL_STORAGE_ORIGINS)[number];
 export type PlaystationPlusPcRoamingSessionStorageOrigin = (typeof PLAYSTATION_PLUS_PC_ROAMING_SESSION_STORAGE_ORIGINS)[number];
