@@ -52,8 +52,9 @@ Prioritized next steps based on current evidence.
 3. Build controller capability and session diagnostics matrices.
 4. Keep machine-readable observations in `src/observations/playstation-web.ts` and `src/observations/playstation-plus-pc.ts` aligned with new evidence.
 5. **Done**: extend the observation-backed provider prototype so more clean-room logic can develop against cached artifacts instead of live account traffic (`npm run prototype:psplus -- status|bootstrap|entitlements|allocate|login`).
-6. Build the next MVP layer on top of the new observation-backed PlayStation Plus prototype: state machine, diagnostics, broker adapter seam, and placeholder queue/launch UX.
-7. If further live GraphQL probing is needed, derive or otherwise confirm persisted hashes only for the small set of currently unprobed read-only bundle queries (`getExperienceId`, `getResolvedProduct`, `wcaRetrieveWishlist`) before issuing spaced requests.
+6. **Done in part**: add a browser-login state machine / confirmation flow on top of the observation-backed PlayStation Plus prototype (`login`, `confirm-login`, `reset-flow`, persisted flow-state artifact).
+7. Build the next MVP layer on top of that flow: diagnostics, broker adapter seam, and placeholder queue/launch UX.
+8. If further live GraphQL probing is needed, derive or otherwise confirm persisted hashes only for the small set of currently unprobed read-only bundle queries (`getExperienceId`, `getResolvedProduct`, `wcaRetrieveWishlist`) before issuing spaced requests.
 
 ## Priority 5 — cloud-stream specific validation
 

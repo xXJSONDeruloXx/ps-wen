@@ -16,7 +16,7 @@ This inventory converts the user-provided preliminary research into repo-local t
 | Public PS Plus PC app asset inventory | Public / generated | Fetches the live JS assets for the current app URL and extracts Kamaji, PC Now, Chihiro, account API, and telemetry namespace clues without using private session material | High |
 | Public PS Plus PC Apollo summary | Public / generated | Extracts structured Kamaji config keys, PC user/account endpoint templates, and auth-flow hints from the live `apollo.js` asset | High |
 | Windows pktmon PC-app metadata capture summary | Local / generated | Summarizes DNS/TLS/443 endpoint metadata from sanctioned `pktmon` captures, including on-wire confirmation of `psnow.playstation.com`, `web.np.playstation.com`, `commerce.api.np.km.playstation.net`, and `cc.prod.gaikai.com` during real local capture windows | High |
-| PlayStation Plus observation-backed MVP prototype | Local / generated | Wraps current browser/native/capture findings into a safe CLI/provider for official login handoff, bootstrap inspection, gated entitlement records, and placeholder allocation seams | High |
+| PlayStation Plus observation-backed MVP prototype | Local / generated | Wraps current browser/native/capture findings into a safe CLI/provider for official login handoff, persisted browser-login flow state, bootstrap inspection, gated entitlement records, and placeholder allocation seams | High |
 
 ## Evidence to collect next
 

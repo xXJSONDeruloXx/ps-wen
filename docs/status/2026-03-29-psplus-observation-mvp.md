@@ -7,7 +7,9 @@ npm run prototype:psplus -- status
 npm run prototype:psplus -- bootstrap
 npm run prototype:psplus -- entitlements
 npm run prototype:psplus -- allocate --title-id CUSA00001 --region us --quality 1080p
-npm run prototype:psplus -- login
+npm run prototype:psplus -- login --wait-seconds 600
+npm run prototype:psplus -- confirm-login --note "browser session ready"
+npm run prototype:psplus -- reset-flow
 npm run prototype:psplus -- login --capture-artifacts --wait-seconds 600
 ```
 
@@ -61,6 +63,7 @@ Returns a consolidated view of:
 - current PC app URL/runtime
 - localhost broker presence
 - captured PlayStation/Sony host families
+- persisted flow-state phase if a login flow has been started
 - capability states for:
   - login
   - native broker
@@ -71,7 +74,7 @@ Returns a consolidated view of:
 
 ### `login`
 
-By default, this now opens the official sign-in URL in the user's **system browser**.
+By default, this now opens the official sign-in URL in the user's **system browser** and records a persisted flow-state artifact.
 
 That is the more sensible MVP/auth shape for a real client because it:
 
@@ -80,6 +83,13 @@ That is the more sensible MVP/auth shape for a real client because it:
 - avoids making Playwright look like a permanent dependency of the product shape
 
 This default mode intentionally does **not** capture cookies or browser storage.
+
+Instead, it creates a manual confirmation flow:
+
+1. open system-browser login
+2. wait for the user to finish in the browser
+3. run `confirm-login`
+4. advance the prototype state machine using the current observation-backed provider status
 
 If local auth artifacts are needed for research, use:
 
@@ -111,6 +121,20 @@ Current records cover:
 - `native-stream-session-bootstrap`
 
 These records intentionally preserve uncertainty through `state: gated` or `state: unknown` style outputs.
+
+### `confirm-login`
+
+This is the manual success event for the system-browser auth flow.
+
+It:
+
+- updates the persisted flow-state artifact
+- records an optional operator note
+- synchronizes the flow state with the current observation-backed provider status
+
+### `reset-flow`
+
+Resets the persisted flow-state artifact back to `signed-out`.
 
 ### `allocate`
 
@@ -145,16 +169,41 @@ What we still cannot honestly implement yet is:
 
 This gives us a safe minimum viable implementation path:
 
-1. **Use official login** through the headed helper.
-2. **Load observation-backed state** from local artifacts.
-3. **Expose placeholder entitlement/allocation seams** for the still-unconfirmed native streaming path.
-4. **Swap placeholders for observed behavior later** when a real Premium queue/start capture exists.
+1. **Open official login** in the user's system browser.
+2. **Confirm login completion manually** through the persisted flow-state artifact.
+3. **Load observation-backed state** from local artifacts.
+4. **Expose placeholder entitlement/allocation seams** for the still-unconfirmed native streaming path.
+5. **Swap placeholders for observed behavior later** when a real Premium queue/start capture exists.
+
+## State-machine artifact
+
+Local-only artifact:
+
+- `artifacts/prototype/playstation-plus-flow-state.json`
+
+Current phase families:
+
+- `signed-out`
+- `browser-login-opened`
+- `browser-login-confirmed`
+- `signed-in-observed`
+- `entitlements-gated`
+- `allocation-placeholder`
+
+## Observed local run
+
+During the first live use of this flow, the official browser login URL reused an already-signed-in browser session.
+
+The flow was then manually confirmed with a note equivalent to:
+
+- `browser session reused existing login`
+
+That is exactly the kind of UX this MVP should support: the user may already be authenticated in the official browser, and the prototype should treat that as a successful login handoff rather than forcing another credential entry.
 
 ## Next best implementation step
 
 Build the next thin-client layer against this MVP instead of waiting for perfect evidence:
 
-- app/session state machine
 - diagnostics panel
 - broker adapter interface
 - title/entitlement UI models
