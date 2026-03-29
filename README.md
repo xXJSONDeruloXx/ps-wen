@@ -50,6 +50,7 @@ To use PSN credentials for official-login experiments, place them in `.env` afte
 
 ```bash
 npm run research:public        # fetch public capability pages and normalize findings
+npm run research:web-assets    # inspect first-party web JS/JSON assets referenced by Safari session summary
 npm run test:unit              # unit tests for auth/endpoint normalization logic
 npm run test:public            # verify collected public evidence has expected capability signals
 npm run env:check              # show readiness for login, bundle, and capture workflows

@@ -184,6 +184,96 @@ export const PLAYSTATION_WEB_API_PROBES: WebApiProbe[] = [
       }
     },
     notes: 'Observed in browser resource URLs; direct replay currently returns an access-denied GraphQL error.'
+  },
+  {
+    id: 'graphql.schema.queryType',
+    kind: 'graphql',
+    preferredOrigins: ['https://store.playstation.com/en-us/pages/latest'],
+    request: {
+      url: GRAPHQL_URL,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-apollo-operation-name': 'SchemaRootProbe'
+      },
+      body: {
+        operationName: 'SchemaRootProbe',
+        query: 'query SchemaRootProbe { __schema { queryType { name } } }'
+      }
+    },
+    notes: 'Controlled introspection probe to see whether GraphQL schema introspection is enabled.'
+  },
+  {
+    id: 'graphql.schema.userProfilesRetrieve',
+    kind: 'graphql',
+    preferredOrigins: ['https://store.playstation.com/en-us/pages/latest'],
+    request: {
+      url: GRAPHQL_URL,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-apollo-operation-name': 'UserProfilesRetrieveProbe'
+      },
+      body: {
+        operationName: 'UserProfilesRetrieveProbe',
+        query: 'query UserProfilesRetrieveProbe { userProfilesRetrieve { __typename } }'
+      }
+    },
+    notes: 'Controlled schema-hint probe based on server suggestions from stale profile-oracle queries.'
+  },
+  {
+    id: 'graphql.schema.userPresenceRetrieve',
+    kind: 'graphql',
+    preferredOrigins: ['https://store.playstation.com/en-us/pages/latest'],
+    request: {
+      url: GRAPHQL_URL,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-apollo-operation-name': 'UserPresenceRetrieveProbe'
+      },
+      body: {
+        operationName: 'UserPresenceRetrieveProbe',
+        query: 'query UserPresenceRetrieveProbe { userPresenceRetrieve { __typename } }'
+      }
+    },
+    notes: 'Controlled schema-hint probe based on server suggestions from stale profile-oracle queries.'
+  },
+  {
+    id: 'graphql.schema.psDirectCartRetrieve',
+    kind: 'graphql',
+    preferredOrigins: ['https://store.playstation.com/en-us/pages/latest'],
+    request: {
+      url: GRAPHQL_URL,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-apollo-operation-name': 'PsDirectCartRetrieveProbe'
+      },
+      body: {
+        operationName: 'PsDirectCartRetrieveProbe',
+        query: 'query PsDirectCartRetrieveProbe { psDirectCartRetrieve { __typename } }'
+      }
+    },
+    notes: 'Controlled schema-hint probe based on server suggestions from stale cart queries.'
+  },
+  {
+    id: 'graphql.schema.purchasedTitlesRetrieve',
+    kind: 'graphql',
+    preferredOrigins: ['https://store.playstation.com/en-us/pages/latest'],
+    request: {
+      url: GRAPHQL_URL,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-apollo-operation-name': 'PurchasedTitlesRetrieveProbe'
+      },
+      body: {
+        operationName: 'PurchasedTitlesRetrieveProbe',
+        query: 'query PurchasedTitlesRetrieveProbe { purchasedTitlesRetrieve { __typename } }'
+      }
+    },
+    notes: 'Controlled schema-hint probe against a field name seen in access-denied persisted-query responses.'
   }
 ];
 

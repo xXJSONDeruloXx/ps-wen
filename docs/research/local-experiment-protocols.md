@@ -8,9 +8,10 @@ Purpose:
 
 Steps:
 1. `npm run research:public`
-2. inspect `artifacts/official-capabilities.json`
-3. run `npm run test:public`
-4. promote meaningful changes into `docs/status/`
+2. `npm run research:web-assets` if Safari endpoint artifacts already exist
+3. inspect `artifacts/official-capabilities.json`
+4. run `npm run test:public`
+5. promote meaningful changes into `docs/status/`
 
 ## 2. Official-login harness
 

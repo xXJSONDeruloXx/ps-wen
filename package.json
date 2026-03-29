@@ -10,6 +10,7 @@
     "check": "npm run build && npm run test:unit && npm run research:public && npm run test:public",
     "env:check": "tsx scripts/validate-env.ts",
     "research:public": "tsx scripts/public/fetch-official-capabilities.ts",
+    "research:web-assets": "tsx scripts/public/inventory-playstation-web-assets.ts",
     "test:public": "playwright test tests/psplus-public.spec.ts",
     "test:psn-login": "playwright test tests/psn-login-smoke.spec.ts --project=chromium",
     "auth:psn-headed": "tsx scripts/auth/manual-psn-login.ts",

@@ -70,6 +70,7 @@ But the results show a split:
   - stale/schema-mismatched
   - reachable but access-denied
   - not obviously reusable outside the exact runtime conditions of the page that emitted them
+- **direct raw GraphQL query attempts** against the `.../graphql/v1/op` endpoint currently fail at the browser/network layer with `TypeError: Load failed`, which suggests that the `op` path is not a straightforward general GraphQL surface for ad-hoc querying
 
 ## Implication for the open-source implementation path
 

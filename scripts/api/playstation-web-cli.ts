@@ -18,6 +18,16 @@ type ProbeExecutionResult = {
   error?: string;
 };
 
+type ProbeClassification =
+  | 'success'
+  | 'schema-hint'
+  | 'schema-drift'
+  | 'access-denied'
+  | 'csrf-blocked'
+  | 'direct-query-blocked'
+  | 'request-error'
+  | 'other';
+
 function usage(): never {
   throw new Error(
     [
@@ -127,20 +137,41 @@ function summarizeJsonShape(value: unknown, depth = 0): unknown {
 }
 
 function summarizeBody(body: string | undefined) {
-  if (!body) return { kind: 'empty' };
+  if (!body) return { kind: 'empty' as const, errorMessages: [] as string[] };
   try {
     const parsed = JSON.parse(body) as { errors?: Array<{ message?: string }> };
     return {
-      kind: 'json',
+      kind: 'json' as const,
       errorMessages: parsed.errors?.map((error) => error.message ?? '(no message)') ?? [],
       shape: summarizeJsonShape(parsed)
     };
   } catch {
     return {
-      kind: 'text',
+      kind: 'text' as const,
+      errorMessages: [] as string[],
       sample: body.slice(0, 500)
     };
   }
+}
+
+function classifyProbeResult(params: {
+  status: ProbeExecutionResult['status'];
+  code: number | null;
+  error: string | null;
+  errorMessages: string[];
+}): ProbeClassification {
+  if (/load failed/i.test(params.error ?? '')) return 'direct-query-blocked';
+  if (params.status === 'error' || params.error) return 'request-error';
+
+  const joined = params.errorMessages.join(' | ');
+  if (/cross-site request forgery|csrf/i.test(joined)) return 'csrf-blocked';
+  if (/access denied/i.test(joined)) return 'access-denied';
+  if (/cannot query field/i.test(joined)) return 'schema-drift';
+  if (/required type|argument|must have a selection of subfields|field .* of type .* must have a selection/i.test(joined)) {
+    return 'schema-hint';
+  }
+  if ((params.code ?? 0) >= 200 && (params.code ?? 0) < 300 && params.errorMessages.length === 0) return 'success';
+  return 'other';
 }
 
 async function executeProbe(probe: WebApiProbe) {
@@ -149,6 +180,14 @@ async function executeProbe(probe: WebApiProbe) {
   const stateVar = `__psWenProbe_${probeKey}`;
   await runJavaScriptInSafariTab(tabIndex, buildProbeJavaScript(probeKey, probe));
   const result = await pollProbe(tabIndex, stateVar);
+
+  const summary = summarizeBody(result.body);
+  const classification = classifyProbeResult({
+    status: result.status,
+    code: result.code ?? null,
+    error: result.error ?? null,
+    errorMessages: summary.errorMessages
+  });
 
   return {
     id: probe.id,
@@ -159,7 +198,11 @@ async function executeProbe(probe: WebApiProbe) {
       url: probe.request.url,
       method: probe.request.method,
       headers: Object.keys(probe.request.headers ?? {}).sort(),
-      hasBody: Boolean(probe.request.body)
+      hasBody: Boolean(probe.request.body),
+      operationName:
+        probe.request.body && typeof probe.request.body === 'object' && 'operationName' in (probe.request.body as Record<string, unknown>)
+          ? String((probe.request.body as Record<string, unknown>).operationName)
+          : null
     },
     response: {
       status: result.status,
@@ -168,7 +211,8 @@ async function executeProbe(probe: WebApiProbe) {
       url: result.url ?? probe.request.url,
       contentType: result.contentType ?? null,
       error: result.error ?? null,
-      summary: summarizeBody(result.body)
+      classification,
+      summary
     },
     rawBody: result.body ?? null
   };
@@ -210,7 +254,11 @@ async function cmdProbe() {
           url: probe.request.url,
           method: probe.request.method,
           headers: Object.keys(probe.request.headers ?? {}).sort(),
-          hasBody: Boolean(probe.request.body)
+          hasBody: Boolean(probe.request.body),
+          operationName:
+            probe.request.body && typeof probe.request.body === 'object' && 'operationName' in (probe.request.body as Record<string, unknown>)
+              ? String((probe.request.body as Record<string, unknown>).operationName)
+              : null
         },
         response: {
           status: 'error',
@@ -219,6 +267,7 @@ async function cmdProbe() {
           url: probe.request.url,
           contentType: null,
           error: error instanceof Error ? error.message : String(error),
+          classification: 'request-error',
           summary: null
         },
         rawBody: null
