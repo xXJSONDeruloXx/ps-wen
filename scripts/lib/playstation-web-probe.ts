@@ -4,6 +4,7 @@ export type ProbeClassification =
   | 'schema-drift'
   | 'access-denied'
   | 'csrf-blocked'
+  | 'opaque-redirect'
   | 'direct-query-blocked'
   | 'request-error'
   | 'other';
@@ -13,6 +14,7 @@ export type ProbeExecutionResult = {
   ok?: boolean;
   code?: number | null;
   url?: string;
+  type?: string | null;
   contentType?: string | null;
   body?: string;
   error?: string | null;
@@ -85,9 +87,11 @@ export function summarizeProbeBody(body: string | undefined) {
 export function classifyProbeResult(params: {
   status: ProbeExecutionResult['status'];
   code: number | null;
+  type?: string | null;
   error: string | null;
   errorMessages: string[];
 }): ProbeClassification {
+  if (params.type === 'opaqueredirect') return 'opaque-redirect';
   if (/load failed/i.test(params.error ?? '')) return 'direct-query-blocked';
   if (params.status === 'error' || params.error) return 'request-error';
 
@@ -122,6 +126,7 @@ export function summarizeProbeReport(results: ProbeReportResult[]) {
       'schema-drift': 0,
       'access-denied': 0,
       'csrf-blocked': 0,
+      'opaque-redirect': 0,
       'direct-query-blocked': 0,
       'request-error': 0,
       other: 0

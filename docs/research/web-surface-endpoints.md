@@ -40,6 +40,13 @@ This is a **browser web-surface** inventory, not a native cloud-streaming protoc
 - `https://web-toolbar.playstation.com/oracle-*.js`
 - `https://web-toolbar.playstation.com/oracle-*.css`
 
+The current toolbar bundle also embeds config pointing to:
+- `https://web.np.playstation.com/api/graphql/v1/`
+- `https://web.np.playstation.com/api/session/v1/`
+- `signInCookieName = isSignedIn`
+- `signInEndpoint = /signin`
+- `signOutEndPoint = /signout`
+
 ### `web.np.playstation.com` GraphQL persisted queries
 Observed query operations include:
 - `getCartItemCount`

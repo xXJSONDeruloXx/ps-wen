@@ -7,6 +7,7 @@ export type WebApiProbe = {
     method: 'GET' | 'POST';
     headers?: Record<string, string>;
     body?: unknown;
+    redirect?: 'follow' | 'manual';
   };
   notes: string;
 };
@@ -274,6 +275,28 @@ export const PLAYSTATION_WEB_API_PROBES: WebApiProbe[] = [
       }
     },
     notes: 'Controlled schema-hint probe against a field name seen in access-denied persisted-query responses.'
+  },
+  {
+    id: 'session.redirect.session',
+    kind: 'json',
+    preferredOrigins: ['https://www.playstation.com/en-us/playstation-network/'],
+    request: {
+      url: 'https://web.np.playstation.com/api/session/v1/session?redirect_uri=https%3A%2F%2Fwww.playstation.com%2Fen-us%2Fplaystation-network%2F',
+      method: 'GET',
+      redirect: 'manual'
+    },
+    notes: 'Observed from the browser login flow; manual redirect probe to confirm redirect-oriented session orchestration.'
+  },
+  {
+    id: 'session.redirect.signin',
+    kind: 'json',
+    preferredOrigins: ['https://www.playstation.com/en-us/playstation-network/'],
+    request: {
+      url: 'https://web.np.playstation.com/api/session/v1/signin?redirect_uri=https%3A%2F%2Fwww.playstation.com%2Fen-us%2Fplaystation-network%2F',
+      method: 'GET',
+      redirect: 'manual'
+    },
+    notes: 'Observed from the browser login flow; manual redirect probe for the sign-in bootstrap path.'
   }
 ];
 

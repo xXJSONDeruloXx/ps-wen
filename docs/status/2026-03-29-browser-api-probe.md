@@ -49,9 +49,20 @@ From the current redacted summary:
 - `success`: `2`
 - `schema-drift`: `3`
 - `access-denied`: `3`
+- `opaque-redirect`: `2`
 - `direct-query-blocked`: `5`
 
-### 4. Three distinct failure modes showed up
+### 4. Session host probes confirm redirect-oriented auth orchestration
+
+Additional probes against observed session-host endpoints showed:
+- `web.np.playstation.com/api/session/v1/session?...` → `opaqueredirect`
+- `web.np.playstation.com/api/session/v1/signin?...` → `opaqueredirect`
+
+Interpretation:
+- these endpoints behave like browser bootstrap/redirect surfaces rather than ordinary JSON APIs
+- the browser-auth/session layer includes explicit redirect choreography, not just cookie checks
+
+### 5. Three distinct failure modes showed up
 
 #### A. Schema drift / stale persisted query behavior
 Examples:

@@ -29,6 +29,7 @@ function buildProbeJavaScript(probeKey: string, probe: WebApiProbe): string {
   const requestInit = {
     method: probe.request.method,
     credentials: 'include',
+    redirect: probe.request.redirect ?? 'follow',
     headers: probe.request.headers ?? {},
     body: probe.request.body ? JSON.stringify(probe.request.body) : undefined
   };
@@ -43,6 +44,7 @@ function buildProbeJavaScript(probeKey: string, probe: WebApiProbe): string {
           ok: res.ok,
           code: res.status,
           url: res.url,
+          type: res.type,
           contentType: res.headers.get('content-type'),
           body: text.slice(0, 200000)
         };
@@ -81,6 +83,7 @@ async function executeProbe(probe: WebApiProbe) {
   const classification = classifyProbeResult({
     status: result.status,
     code: result.code ?? null,
+    type: result.type ?? null,
     error: result.error ?? null,
     errorMessages: summary.errorMessages
   });
@@ -95,6 +98,7 @@ async function executeProbe(probe: WebApiProbe) {
       method: probe.request.method,
       headers: Object.keys(probe.request.headers ?? {}).sort(),
       hasBody: Boolean(probe.request.body),
+      redirect: probe.request.redirect ?? 'follow',
       operationName:
         probe.request.body && typeof probe.request.body === 'object' && 'operationName' in (probe.request.body as Record<string, unknown>)
           ? String((probe.request.body as Record<string, unknown>).operationName)
@@ -105,6 +109,7 @@ async function executeProbe(probe: WebApiProbe) {
       ok: result.ok ?? false,
       code: result.code ?? null,
       url: result.url ?? probe.request.url,
+      type: result.type ?? null,
       contentType: result.contentType ?? null,
       error: result.error ?? null,
       classification,
@@ -151,6 +156,7 @@ async function cmdProbe() {
           method: probe.request.method,
           headers: Object.keys(probe.request.headers ?? {}).sort(),
           hasBody: Boolean(probe.request.body),
+          redirect: probe.request.redirect ?? 'follow',
           operationName:
             probe.request.body && typeof probe.request.body === 'object' && 'operationName' in (probe.request.body as Record<string, unknown>)
               ? String((probe.request.body as Record<string, unknown>).operationName)
@@ -161,6 +167,7 @@ async function cmdProbe() {
           ok: false,
           code: null,
           url: probe.request.url,
+          type: null,
           contentType: null,
           error: error instanceof Error ? error.message : String(error),
           classification: 'request-error',
