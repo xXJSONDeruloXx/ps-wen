@@ -15,6 +15,7 @@
     "research:pc-app-assets": "tsx scripts/public/inventory-playstation-plus-pc-app-assets.ts",
     "research:pc-app-apollo": "tsx scripts/public/extract-playstation-plus-pc-apollo-summary.ts",
     "research:control-plane": "tsx scripts/observations/summarize-playstation-web-control-plane.ts",
+    "prototype:psplus": "tsx scripts/prototype/playstation-plus-cli.ts",
     "test:public": "playwright test tests/psplus-public.spec.ts",
     "test:psn-login": "playwright test tests/psn-login-smoke.spec.ts --project=chromium",
     "auth:psn-headed": "tsx scripts/auth/manual-psn-login.ts",

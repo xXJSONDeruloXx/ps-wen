@@ -41,11 +41,18 @@ export interface QueryProvider {
   executePersistedQuery<T = unknown>(request: PersistedQueryRequest): Promise<PersistedQueryResponse<T>>;
 }
 
+export type EvidenceConfidence = 'observed' | 'inferred';
+
+export type EntitlementState = 'active' | 'inactive' | 'gated' | 'unknown';
+
 export type EntitlementRecord = {
   id: string;
   source: string;
-  active: boolean;
+  state: EntitlementState;
+  confidence: EvidenceConfidence;
   attributes?: Record<string, unknown>;
+  evidence?: string[];
+  notes?: string[];
 };
 
 export interface EntitlementProvider {
@@ -59,10 +66,15 @@ export type SessionAllocationRequest = {
 };
 
 export type SessionAllocation = {
-  sessionId: string;
+  state: 'allocated' | 'blocked' | 'placeholder';
+  confidence: EvidenceConfidence;
+  sessionId?: string;
   region?: string;
   transportHint?: 'webrtc' | 'custom-udp' | 'quic-like' | 'unknown';
   endpointHints?: string[];
+  evidence?: string[];
+  blockers?: string[];
+  notes?: string[];
 };
 
 export interface SessionAllocator {
