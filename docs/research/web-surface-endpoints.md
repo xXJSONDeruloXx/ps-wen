@@ -1,6 +1,6 @@
 # PlayStation web surface endpoint inventory
 
-Derived from `artifacts/auth/safari-session-summary.json` while using an already authenticated Safari session.
+Derived from `artifacts/auth/safari-session-summary.json` and the normalized `artifacts/auth/safari-endpoint-report.json` while using an already authenticated Safari session.
 
 ## Scope
 

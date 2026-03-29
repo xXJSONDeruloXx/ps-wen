@@ -1,8 +1,9 @@
 # Web endpoint sweep — 2026-03-29
 
-## Artifact
+## Artifacts
 
 - `artifacts/auth/safari-session-summary.json`
+- `artifacts/auth/safari-endpoint-report.json`
 
 ## Method
 
@@ -53,6 +54,7 @@ Observed independently of core page rendering:
 ## Why this matters
 
 This is the clearest current evidence in-repo for the **web control plane**:
+- normalized endpoint reporting now exists, so host/path/query-key inventories can be regenerated without copying raw query values into docs
 - web auth/session state
 - profile/bootstrap queries
 - store/state/runtime split

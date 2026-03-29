@@ -38,6 +38,8 @@ Execution:
    - `artifacts/auth/manual-login-final.png`
 5. if Safari already has a good PlayStation session, enable `Allow JavaScript from Apple Events` in Safari's Developer settings and run:
    - `npm run auth:safari-summary`
+   - `npm run auth:safari-endpoints`
+   - inspect `artifacts/auth/safari-endpoint-report.json` for normalized host/path/query-key inventories
 5. never commit the storage state or raw auth artifacts
 
 Notes:
