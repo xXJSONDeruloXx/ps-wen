@@ -11,14 +11,15 @@ This inventory converts the user-provided preliminary research into repo-local t
 | Asobi / Portal app listings and release notes | Community / proprietary | Third-party claims suggest non-wrapper implementations may exist | Medium |
 | Historical PS Now measurement paper | Academic | Best packet-level public clue for Sony-era cloud gaming behavior | Medium |
 | Community PSN OAuth docs and libraries | Community | Strong hint for account/session plumbing patterns | Medium |
-| Historical PS Now PC Electron/ASAR findings | Community | Makes bundle archaeology a productive path | Medium |
+| Historical PS Now PC Electron/ASAR findings | Community | Made bundle archaeology a productive path and are now locally confirmed by the installed Windows payload | High |
+| Installed PlayStation Plus 12.5.0 Windows payload summary | Local / generated | Directly confirms Electron/ASAR shell, localhost broker, PS Now app URL, updater URL, and redacted auth-storage surfaces | High |
 
 ## Evidence to collect next
 
 1. Raw HTML snapshots for current official support/product pages.
 2. A successful official-login browser state capture using local credentials.
-3. Static inventory output for any current official PC app bundle available locally.
-4. A metadata-only pcap taken during owned-account use of an official surface.
+3. Metadata-only capture while the current official PC app is idle and while it enters any real stream/queue path available on the account.
+4. A hostname/timing comparison between browser-only evidence and native-client evidence.
 
 ## Confidence rules
 
