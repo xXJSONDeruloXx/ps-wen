@@ -172,6 +172,33 @@ export const PLAYSTATION_PLUS_PC_REDACTED_AUTH_REDIRECTS = [
   }
 ] as const;
 
+export const PLAYSTATION_PLUS_PC_PUBLIC_KAMAJI_PATHS = [
+  'https://psnow.playstation.com/kamaji/api/<serviceType>/00_09_000/',
+  'kamaji/api/psnow/00_09_000/',
+  'kamaji/api/swordfish/00_09_000/'
+] as const;
+
+export const PLAYSTATION_PLUS_PC_PUBLIC_USER_API_PATHS = ['gateway/lists/v1/users/me/lists', 'geo', 'user/stores'] as const;
+
+export const PLAYSTATION_PLUS_PC_PUBLIC_ACCOUNT_API_TEMPLATES = [
+  'https://lists.<line>.api.playstation.com/v1/users/me/lists',
+  'https://accounts.<line>.api.playstation.com/api/v2/accounts/me/attributes',
+  'https://merchandise<line>.api.playstation.com/v1/channels/19/contexts/<Banners>',
+  'https://merchandise<line>.api.playstation.com/v1/users/me/channels/19/contexts/<Banners>'
+] as const;
+
+export const PLAYSTATION_PLUS_PC_PUBLIC_GRAND_CENTRAL_CONFIG_KEYS = [
+  'clientId',
+  'duid',
+  'kamajiEnv',
+  'kamajiEventsBatchLimit',
+  'kamajiEventsTransmitInterval',
+  'kamajiEventsUrl',
+  'kamajiHostUrl',
+  'psnPassword',
+  'psnUsername'
+] as const;
+
 export type PlaystationPlusPcPreloadCommand = (typeof PLAYSTATION_PLUS_PC_PRELOAD_COMMANDS)[number];
 export type PlaystationPlusPcNotifierCommand = (typeof PLAYSTATION_PLUS_PC_NOTIFIER_COMMANDS)[number];
 export type PlaystationPlusPcAuthCookieDomain = (typeof PLAYSTATION_PLUS_PC_AUTH_COOKIE_DOMAINS)[number];
