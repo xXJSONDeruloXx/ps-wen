@@ -80,6 +80,18 @@ export type PcSysinfoSummary = {
   hasGpuModel: boolean;
 };
 
+export type PcAuthRedirectKind = 'authorization-code' | 'access-token' | 'other';
+
+export type PcAuthRedirectSummary = {
+  kind: PcAuthRedirectKind;
+  origin: string;
+  path: string;
+  queryKeys: string[];
+  fragmentKeys: string[];
+  hasNpGrantCodeHeader: boolean;
+  sourceFiles: string[];
+};
+
 export type PcBrowserProfileSummary = {
   rootDir: string;
   present: boolean;
@@ -88,6 +100,13 @@ export type PcBrowserProfileSummary = {
   sessionStorageFiles: string[];
   preferenceTopLevelKeys: string[];
   networkPersistentStateKeys: string[];
+  networkServerHints: string[];
+  localStorageLevelDbOrigins: string[];
+  localStorageLevelDbKeys: Record<string, string[]>;
+  sessionStorageOrigins: string[];
+  sessionStorageKeys: Record<string, string[]>;
+  codeCacheAssetUrls: string[];
+  authRedirects: PcAuthRedirectSummary[];
 };
 
 export type PcProcessSummary = {
@@ -190,6 +209,13 @@ export type PcAuthSummary = {
     }>;
   };
   indexedDbOrigins: string[];
+  cachedAuthRedirects: Array<{
+    kind: PcAuthRedirectKind;
+    path: string;
+    queryKeys: string[];
+    fragmentKeys: string[];
+    hasNpGrantCodeHeader: boolean;
+  }>;
   notes: string[];
 };
 
@@ -409,6 +435,215 @@ export function parseChromiumOriginName(fileName: string) {
   return `${match[1]}://${match[2]}`;
 }
 
+async function walkFiles(rootDir: string): Promise<string[]> {
+  if (!(await pathExists(rootDir))) return [];
+  const entries = await fs.readdir(rootDir, { withFileTypes: true });
+  const results: string[] = [];
+  for (const entry of entries) {
+    const fullPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...(await walkFiles(fullPath)));
+    } else if (entry.isFile()) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
+
+function normalizeExtractedStorageKey(key: string) {
+  const normalized = key.trim();
+  if (!normalized) return normalized;
+
+  const knownPrefixes = [
+    '!telemetry-web!identifier-session-id',
+    '!telemetry-web!identifier-short-term-id',
+    '__storage_test__',
+    '__ls_config_flags',
+    'privacyLevel-',
+    'isOfValidAge',
+    'appVersion',
+    'ak_bm_tab_id',
+    'modernizr',
+    'dummy',
+    'locale',
+    'DUID',
+    'ak_ax',
+    'ak_a'
+  ];
+
+  for (const prefix of knownPrefixes) {
+    if (prefix.endsWith('-')) {
+      if (normalized.startsWith(prefix)) return normalized;
+      continue;
+    }
+
+    if (normalized === prefix || normalized.startsWith(prefix)) {
+      return prefix;
+    }
+  }
+
+  return normalized.replace(/[!]+$/g, '');
+}
+
+function addKey(map: Map<string, Set<string>>, origin: string, key: string) {
+  if (!origin || !key) return;
+  const normalizedKey = normalizeExtractedStorageKey(key);
+  if (!normalizedKey) return;
+  const entries = map.get(origin) ?? new Set<string>();
+  entries.add(normalizedKey);
+  map.set(origin, entries);
+}
+
+function finalizeKeyMap(map: Map<string, Set<string>>) {
+  const normalizedOrigins = uniqueSorted(map.keys());
+  const keysByOrigin = Object.fromEntries(
+    normalizedOrigins.map((origin) => {
+      const keys = uniqueSorted(map.get(origin) ?? []);
+      const filtered = keys.filter(
+        (key) => !keys.some((other) => other !== key && key.startsWith(other) && key.slice(other.length).length <= 4)
+      );
+      return [origin, filtered];
+    })
+  );
+
+  return {
+    origins: normalizedOrigins,
+    keysByOrigin
+  };
+}
+
+export function extractLevelDbOriginKeyMap(text: string) {
+  const map = new Map<string, Set<string>>();
+  const originRegex = /META:(https:\/\/[A-Za-z0-9.-]+)/g;
+  for (const match of text.matchAll(originRegex)) {
+    addKey(map, match[1], '__meta__');
+  }
+
+  const entryRegex = /_(https:\/\/[A-Za-z0-9.-]+)\u0000\u0001([A-Za-z0-9!_.:+@\/-]{1,160})/g;
+  for (const match of text.matchAll(entryRegex)) {
+    addKey(map, match[1], match[2]);
+  }
+
+  const result = finalizeKeyMap(map);
+  for (const origin of Object.keys(result.keysByOrigin)) {
+    result.keysByOrigin[origin] = result.keysByOrigin[origin].filter((key) => key !== '__meta__');
+  }
+  return result;
+}
+
+export function extractSessionStorageOriginKeyMap(text: string) {
+  const map = new Map<string, Set<string>>();
+  const tokenRegex = /namespace-[^\u0000\r\n]*?(https:\/\/[A-Za-z0-9.-]+)\/|map-\d+-([A-Za-z0-9!_.:+@\/-]{1,160})/g;
+  let currentOrigin: string | null = null;
+
+  for (const match of text.matchAll(tokenRegex)) {
+    if (match[1]) {
+      currentOrigin = match[1];
+      if (!map.has(currentOrigin)) {
+        map.set(currentOrigin, new Set<string>());
+      }
+      continue;
+    }
+
+    if (match[2] && currentOrigin) {
+      addKey(map, currentOrigin, match[2]);
+    }
+  }
+
+  return finalizeKeyMap(map);
+}
+
+export function extractCodeCacheAssetUrls(text: string) {
+  return uniqueSorted(
+    [...text.matchAll(/https:\/\/psnow\.playstation\.com\/app\/[^\s\u0000"']+\/assets\/[A-Za-z0-9._-]+/g)].map(
+      (match) => match[0]
+    )
+  );
+}
+
+export function summarizeRedirectUrl(rawUrl: string): Omit<PcAuthRedirectSummary, 'hasNpGrantCodeHeader' | 'sourceFiles'> {
+  try {
+    const url = new URL(rawUrl);
+    const queryKeys = uniqueSorted(url.searchParams.keys());
+    const fragment = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash;
+    const fragmentKeys = uniqueSorted(new URLSearchParams(fragment).keys());
+    const kind: PcAuthRedirectKind = fragmentKeys.includes('access_token')
+      ? 'access-token'
+      : queryKeys.includes('code')
+        ? 'authorization-code'
+        : 'other';
+
+    return {
+      kind,
+      origin: url.origin,
+      path: url.pathname,
+      queryKeys,
+      fragmentKeys
+    };
+  } catch {
+    return {
+      kind: 'other',
+      origin: '',
+      path: rawUrl,
+      queryKeys: [],
+      fragmentKeys: []
+    };
+  }
+}
+
+export function extractAuthRedirects(text: string, sourceFile: string): PcAuthRedirectSummary[] {
+  const redirects = new Map<string, PcAuthRedirectSummary>();
+  const matches = text.matchAll(
+    /https:\/\/psnow\.playstation\.com\/app\/[^\s\u0000"']+\/grc-response\.html(?:\?[^\s\u0000"']+|#[^\s\u0000"']+)?/g
+  );
+
+  for (const match of matches) {
+    const baseSummary = summarizeRedirectUrl(match[0]);
+    if (baseSummary.kind === 'other' && baseSummary.queryKeys.length === 0 && baseSummary.fragmentKeys.length === 0) {
+      continue;
+    }
+    const id = [baseSummary.kind, baseSummary.origin, baseSummary.path, baseSummary.queryKeys.join(','), baseSummary.fragmentKeys.join(',')].join('|');
+    const existing = redirects.get(id);
+    if (existing) {
+      existing.sourceFiles = uniqueSorted([...existing.sourceFiles, sourceFile]);
+      existing.hasNpGrantCodeHeader = existing.hasNpGrantCodeHeader || text.includes('X-NP-GRANT-CODE');
+      continue;
+    }
+
+    redirects.set(id, {
+      ...baseSummary,
+      hasNpGrantCodeHeader: text.includes('X-NP-GRANT-CODE'),
+      sourceFiles: [sourceFile]
+    });
+  }
+
+  return [...redirects.values()].sort((left, right) => left.path.localeCompare(right.path) || left.kind.localeCompare(right.kind));
+}
+
+async function readNetworkServerHints(filePath: string) {
+  if (!(await pathExists(filePath))) return [];
+  try {
+    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as {
+      net?: { http_server_properties?: { servers?: Array<{ server?: string }> } };
+    };
+    return uniqueSorted((parsed.net?.http_server_properties?.servers ?? []).map((entry) => entry.server ?? '').filter(Boolean));
+  } catch {
+    return [];
+  }
+}
+
+async function scanBinaryTextFiles(rootDir: string, handler: (text: string, filePath: string) => void | Promise<void>) {
+  for (const filePath of await walkFiles(rootDir)) {
+    if (/\\LOCK$/i.test(filePath)) continue;
+    try {
+      const buffer = await fs.readFile(filePath);
+      await handler(buffer.toString('latin1'), filePath);
+    } catch {
+      // ignore unreadable or concurrently locked files
+    }
+  }
+}
+
 async function copyFileToTemp(target: string) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ps-wen-sqlite-'));
   const tempPath = path.join(tempDir, path.basename(target));
@@ -592,7 +827,14 @@ async function summarizeBrowserProfile(rootDir: string): Promise<PcBrowserProfil
       indexedDbOrigins: [],
       sessionStorageFiles: [],
       preferenceTopLevelKeys: [],
-      networkPersistentStateKeys: []
+      networkPersistentStateKeys: [],
+      networkServerHints: [],
+      localStorageLevelDbOrigins: [],
+      localStorageLevelDbKeys: {},
+      sessionStorageOrigins: [],
+      sessionStorageKeys: {},
+      codeCacheAssetUrls: [],
+      authRedirects: []
     };
   }
 
@@ -609,12 +851,51 @@ async function summarizeBrowserProfile(rootDir: string): Promise<PcBrowserProfil
     : [];
 
   const sessionStorageDir = path.join(rootDir, 'Session Storage');
-  const sessionStorageFiles = (await pathExists(sessionStorageDir))
-    ? uniqueSorted(await fs.readdir(sessionStorageDir))
-    : [];
+  const sessionStorageFiles = (await pathExists(sessionStorageDir)) ? uniqueSorted(await fs.readdir(sessionStorageDir)) : [];
 
   const preferenceTopLevelKeys = await readJsonTopLevelKeys(path.join(rootDir, 'Preferences'));
-  const networkPersistentStateKeys = await readJsonTopLevelKeys(path.join(rootDir, 'Network Persistent State'));
+  const networkPersistentStatePath = path.join(rootDir, 'Network Persistent State');
+  const networkPersistentStateKeys = await readJsonTopLevelKeys(networkPersistentStatePath);
+  const networkServerHints = await readNetworkServerHints(networkPersistentStatePath);
+
+  const localStorageMap = new Map<string, Set<string>>();
+  await scanBinaryTextFiles(path.join(rootDir, 'Local Storage', 'leveldb'), (text) => {
+    const extracted = extractLevelDbOriginKeyMap(text);
+    for (const [origin, keys] of Object.entries(extracted.keysByOrigin)) {
+      for (const key of keys) addKey(localStorageMap, origin, key);
+    }
+  });
+  const localStorageLevelDb = finalizeKeyMap(localStorageMap);
+
+  const sessionStorageMap = new Map<string, Set<string>>();
+  await scanBinaryTextFiles(sessionStorageDir, (text) => {
+    const extracted = extractSessionStorageOriginKeyMap(text);
+    for (const [origin, keys] of Object.entries(extracted.keysByOrigin)) {
+      for (const key of keys) addKey(sessionStorageMap, origin, key);
+    }
+  });
+  const sessionStorage = finalizeKeyMap(sessionStorageMap);
+
+  const codeCacheAssetUrls = new Set<string>();
+  await scanBinaryTextFiles(path.join(rootDir, 'Code Cache', 'js'), (text) => {
+    for (const assetUrl of extractCodeCacheAssetUrls(text)) {
+      codeCacheAssetUrls.add(assetUrl);
+    }
+  });
+
+  const authRedirectMap = new Map<string, PcAuthRedirectSummary>();
+  await scanBinaryTextFiles(path.join(rootDir, 'Cache'), (text, filePath) => {
+    for (const redirect of extractAuthRedirects(text, path.basename(filePath))) {
+      const id = [redirect.kind, redirect.origin, redirect.path, redirect.queryKeys.join(','), redirect.fragmentKeys.join(',')].join('|');
+      const existing = authRedirectMap.get(id);
+      if (existing) {
+        existing.sourceFiles = uniqueSorted([...existing.sourceFiles, ...redirect.sourceFiles]);
+        existing.hasNpGrantCodeHeader = existing.hasNpGrantCodeHeader || redirect.hasNpGrantCodeHeader;
+      } else {
+        authRedirectMap.set(id, redirect);
+      }
+    }
+  });
 
   return {
     rootDir,
@@ -623,7 +904,14 @@ async function summarizeBrowserProfile(rootDir: string): Promise<PcBrowserProfil
     indexedDbOrigins,
     sessionStorageFiles,
     preferenceTopLevelKeys,
-    networkPersistentStateKeys
+    networkPersistentStateKeys,
+    networkServerHints,
+    localStorageLevelDbOrigins: localStorageLevelDb.origins,
+    localStorageLevelDbKeys: localStorageLevelDb.keysByOrigin,
+    sessionStorageOrigins: sessionStorage.origins,
+    sessionStorageKeys: sessionStorage.keysByOrigin,
+    codeCacheAssetUrls: uniqueSorted(codeCacheAssetUrls),
+    authRedirects: [...authRedirectMap.values()].sort((left, right) => left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path))
   };
 }
 
@@ -936,6 +1224,13 @@ export async function summarizePlaystationPlusPcAuth(options?: {
     cookieSurfaces,
     localStorage,
     indexedDbOrigins: surface.storage.roamingProfile.browserProfile.indexedDbOrigins,
+    cachedAuthRedirects: surface.storage.roamingProfile.browserProfile.authRedirects.map((redirect) => ({
+      kind: redirect.kind,
+      path: redirect.path,
+      queryKeys: redirect.queryKeys,
+      fragmentKeys: redirect.fragmentKeys,
+      hasNpGrantCodeHeader: redirect.hasNpGrantCodeHeader
+    })),
     notes: [
       'Raw cookie values, bearer material, and opaque identifiers are intentionally not emitted.',
       'The summary is intended for redacted auth-surface mapping only.'

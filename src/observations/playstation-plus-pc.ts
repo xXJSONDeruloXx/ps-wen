@@ -130,8 +130,54 @@ export const PLAYSTATION_PLUS_PC_LOCAL_STORAGE_KEYS = ['DUID', 'currentUser', 'l
 
 export const PLAYSTATION_PLUS_PC_INDEXEDDB_ORIGINS = ['https://my.account.sony.com', 'https://h.online-metrix.net'] as const;
 
+export const PLAYSTATION_PLUS_PC_NETWORK_HINT_HOSTS = [
+  'https://redirector.gvt1.com',
+  'https://smetrics.aem.playstation.com',
+  'https://static.playstation.com',
+  'https://web.np.playstation.com'
+] as const;
+
+export const PLAYSTATION_PLUS_PC_CODE_CACHE_ASSET_URLS = [
+  'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/assets/apollo.js',
+  'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/assets/js_ex.min.js',
+  'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/assets/vendor.js'
+] as const;
+
+export const PLAYSTATION_PLUS_PC_ROAMING_LOCAL_STORAGE_ORIGINS = [
+  'https://my.account.sony.com',
+  'https://psnow.playstation.com',
+  'https://skw.eve.account.sony.com'
+] as const;
+
+export const PLAYSTATION_PLUS_PC_ROAMING_SESSION_STORAGE_ORIGINS = [
+  'https://my.account.sony.com',
+  'https://psnow.playstation.com'
+] as const;
+
+export const PLAYSTATION_PLUS_PC_REDACTED_AUTH_REDIRECTS = [
+  {
+    kind: 'authorization-code',
+    path: '/app/2.2.0/133/5cdcc037d/grc-response.html',
+    queryKeys: ['cid', 'code']
+  },
+  {
+    kind: 'access-token',
+    path: '/app/2.2.0/133/5cdcc037d/grc-response.html',
+    fragmentKeys: ['access_token', 'cid', 'expires_in', 'token_type']
+  },
+  {
+    kind: 'other',
+    path: '/app/2.2.0/133/5cdcc037d/grc-response.html',
+    queryKeys: ['error', 'error_code', 'error_description', 'no_captcha']
+  }
+] as const;
+
 export type PlaystationPlusPcPreloadCommand = (typeof PLAYSTATION_PLUS_PC_PRELOAD_COMMANDS)[number];
 export type PlaystationPlusPcNotifierCommand = (typeof PLAYSTATION_PLUS_PC_NOTIFIER_COMMANDS)[number];
 export type PlaystationPlusPcAuthCookieDomain = (typeof PLAYSTATION_PLUS_PC_AUTH_COOKIE_DOMAINS)[number];
 export type PlaystationPlusPcLocalStorageKey = (typeof PLAYSTATION_PLUS_PC_LOCAL_STORAGE_KEYS)[number];
 export type PlaystationPlusPcIndexedDbOrigin = (typeof PLAYSTATION_PLUS_PC_INDEXEDDB_ORIGINS)[number];
+export type PlaystationPlusPcNetworkHintHost = (typeof PLAYSTATION_PLUS_PC_NETWORK_HINT_HOSTS)[number];
+export type PlaystationPlusPcCodeCacheAssetUrl = (typeof PLAYSTATION_PLUS_PC_CODE_CACHE_ASSET_URLS)[number];
+export type PlaystationPlusPcRoamingLocalStorageOrigin = (typeof PLAYSTATION_PLUS_PC_ROAMING_LOCAL_STORAGE_ORIGINS)[number];
+export type PlaystationPlusPcRoamingSessionStorageOrigin = (typeof PLAYSTATION_PLUS_PC_ROAMING_SESSION_STORAGE_ORIGINS)[number];

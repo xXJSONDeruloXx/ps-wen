@@ -27,6 +27,10 @@ async function main() {
   console.log(`Current app URL: ${summary.shell.currentAppUrl ?? 'not detected'}`);
   console.log(`Local IPC: ws://${summary.ipc.localWebSocket.host}:${summary.ipc.localWebSocket.port}/`);
   console.log(`Roaming IndexedDB origins: ${summary.storage.roamingProfile.browserProfile.indexedDbOrigins.join(', ') || 'none'}`);
+  console.log(
+    `Cached auth redirects: ${summary.storage.roamingProfile.browserProfile.authRedirects.map((item) => item.kind).join(', ') || 'none'}`
+  );
+  console.log(`Cached asset URLs: ${summary.storage.roamingProfile.browserProfile.codeCacheAssetUrls.length}`);
 }
 
 main().catch((error) => {

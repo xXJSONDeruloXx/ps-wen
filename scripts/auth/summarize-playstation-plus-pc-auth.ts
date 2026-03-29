@@ -25,6 +25,7 @@ async function main() {
   console.log(`Likely signed in: ${summary.likelySignedIn}`);
   console.log(`Current app URL: ${summary.currentAppUrl ?? 'not detected'}`);
   console.log(`IndexedDB origins: ${summary.indexedDbOrigins.join(', ') || 'none'}`);
+  console.log(`Cached auth redirects: ${summary.cachedAuthRedirects.map((item) => item.kind).join(', ') || 'none'}`);
 }
 
 main().catch((error) => {
