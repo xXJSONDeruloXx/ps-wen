@@ -23,3 +23,11 @@ This repo now includes a browser-session API probe path for first-party PlayStat
 - allowlisted
 - evidence-backed
 - local-artifact-first
+- intentionally paced to avoid unnecessary account activity
+
+## Pacing guidance
+
+- prefer small subset runs via `--ids` over full sweeps
+- keep several seconds between requests (the CLI now defaults to a 4s gap for `probe`)
+- synthesize cached summaries before deciding whether another live request is needed
+- write alternative outputs via `--out` when doing a low-touch spot check so broad prior reports remain intact

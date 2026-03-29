@@ -9,19 +9,92 @@ import {
   type ProbeExecutionResult
 } from '../lib/playstation-web-probe.js';
 
-const DEFAULT_OUT = resolveArtifactPath(undefined, 'artifacts/api/playstation-web-probe-report.json');
+const DEFAULT_OUT = 'artifacts/api/playstation-web-probe-report.json';
+const DEFAULT_DELAY_MS = 4_000;
 const POLL_INTERVAL_MS = 500;
 const POLL_TIMEOUT_MS = 20_000;
+
+type ParsedArgs = {
+  command?: string;
+  positional: string[];
+  flags: Record<string, string | true>;
+};
 
 function usage(): never {
   throw new Error(
     [
       'Usage:',
-      '  npm run api:playstation-web -- list',
-      '  npm run api:playstation-web -- call <probe-id>',
-      '  npm run api:playstation-web -- probe'
+      '  npm run api:playstation-web -- list [--ids id1,id2]',
+      '  npm run api:playstation-web -- call <probe-id> [--out <path>]',
+      '  npm run api:playstation-web -- probe [--ids id1,id2] [--delay-ms 4000] [--out <path>]'
     ].join('\n')
   );
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const [command, ...rest] = argv;
+  const positional: string[] = [];
+  const flags: Record<string, string | true> = {};
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const token = rest[index];
+    if (!token.startsWith('--')) {
+      positional.push(token);
+      continue;
+    }
+
+    const [rawKey, inlineValue] = token.slice(2).split('=', 2);
+    if (inlineValue !== undefined) {
+      flags[rawKey] = inlineValue;
+      continue;
+    }
+
+    const next = rest[index + 1];
+    if (!next || next.startsWith('--')) {
+      flags[rawKey] = true;
+      continue;
+    }
+
+    flags[rawKey] = next;
+    index += 1;
+  }
+
+  return { command, positional, flags };
+}
+
+function parseIds(flags: ParsedArgs['flags']): string[] | null {
+  const raw = flags.ids;
+  if (!raw || raw === true) return null;
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function parseDelayMs(flags: ParsedArgs['flags']): number {
+  const raw = flags['delay-ms'];
+  if (!raw || raw === true) return DEFAULT_DELAY_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid --delay-ms value: ${String(raw)}`);
+  }
+  return parsed;
+}
+
+function selectProbes(ids: string[] | null): WebApiProbe[] {
+  if (!ids || ids.length === 0) return PLAYSTATION_WEB_API_PROBES;
+
+  const selected = ids.map((id) => {
+    const probe = getWebApiProbe(id);
+    if (!probe) throw new Error(`Unknown probe id: ${id}`);
+    return probe;
+  });
+
+  return selected;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildProbeJavaScript(probeKey: string, probe: WebApiProbe): string {
@@ -66,7 +139,7 @@ async function pollProbe(tabIndex: number, stateVar: string): Promise<ProbeExecu
         return parsed as ProbeExecutionResult;
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    await sleep(POLL_INTERVAL_MS);
   }
 
   throw new Error(`Timed out waiting for Safari probe state ${stateVar}`);
@@ -119,31 +192,44 @@ async function executeProbe(probe: WebApiProbe) {
   };
 }
 
-async function writeReport(report: unknown, outputPath = DEFAULT_OUT) {
+async function writeReport(report: unknown, outputPath: string) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   return outputPath;
 }
 
-async function cmdList() {
-  for (const probe of PLAYSTATION_WEB_API_PROBES) {
+async function cmdList(parsed: ParsedArgs) {
+  for (const probe of selectProbes(parseIds(parsed.flags))) {
     console.log(`${probe.id} [${probe.kind}]`);
     console.log(`  ${probe.notes}`);
   }
 }
 
-async function cmdCall(id: string) {
+async function cmdCall(id: string, parsed: ParsedArgs) {
   const probe = getWebApiProbe(id);
   if (!probe) throw new Error(`Unknown probe id: ${id}`);
   const result = await executeProbe(probe);
-  const outputPath = await writeReport({ generatedAt: new Date().toISOString(), results: [result] });
+  const outputPath = await writeReport(
+    { generatedAt: new Date().toISOString(), results: [result] },
+    resolveArtifactPath(typeof parsed.flags.out === 'string' ? parsed.flags.out : undefined, DEFAULT_OUT)
+  );
   console.log(`Wrote ${outputPath}`);
   console.log(JSON.stringify(result.response, null, 2));
 }
 
-async function cmdProbe() {
+async function cmdProbe(parsed: ParsedArgs) {
+  const probes = selectProbes(parseIds(parsed.flags));
+  const delayMs = parseDelayMs(parsed.flags);
+  const outputPath = resolveArtifactPath(typeof parsed.flags.out === 'string' ? parsed.flags.out : undefined, DEFAULT_OUT);
   const results = [];
-  for (const probe of PLAYSTATION_WEB_API_PROBES) {
+
+  console.log(`Probing ${probes.length} endpoint(s) with ${delayMs}ms spacing between requests.`);
+  for (const [index, probe] of probes.entries()) {
+    if (index > 0 && delayMs > 0) {
+      console.log(`Waiting ${delayMs}ms before ${probe.id}...`);
+      await sleep(delayMs);
+    }
+
     try {
       results.push(await executeProbe(probe));
     } catch (error) {
@@ -178,7 +264,7 @@ async function cmdProbe() {
     }
   }
 
-  const outputPath = await writeReport({ generatedAt: new Date().toISOString(), results });
+  await writeReport({ generatedAt: new Date().toISOString(), results }, outputPath);
   console.log(`Wrote ${outputPath}`);
   for (const result of results) {
     console.log(`- ${result.id}: ${result.response.status} ${result.response.code ?? ''}`.trim());
@@ -186,15 +272,16 @@ async function cmdProbe() {
 }
 
 async function main() {
-  const [command, arg] = process.argv.slice(2);
-  if (!command) usage();
+  const parsed = parseArgs(process.argv.slice(2));
+  if (!parsed.command) usage();
 
-  if (command === 'list') return cmdList();
-  if (command === 'call') {
-    if (!arg) usage();
-    return cmdCall(arg);
+  if (parsed.command === 'list') return cmdList(parsed);
+  if (parsed.command === 'call') {
+    const id = parsed.positional[0];
+    if (!id) usage();
+    return cmdCall(id, parsed);
   }
-  if (command === 'probe') return cmdProbe();
+  if (parsed.command === 'probe') return cmdProbe(parsed);
 
   usage();
 }

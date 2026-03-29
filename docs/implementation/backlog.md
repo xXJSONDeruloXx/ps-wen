@@ -41,6 +41,7 @@ Prioritized next steps based on current evidence.
 2. Start a minimal thin-client telemetry schema.
 3. Build controller capability and session diagnostics matrices.
 4. Keep machine-readable observations in `src/observations/playstation-web.ts` aligned with new evidence.
+5. Extend the observation-backed provider prototype so more clean-room logic can develop against cached artifacts instead of live account traffic.
 
 ## Priority 5 — cloud-stream specific validation
 

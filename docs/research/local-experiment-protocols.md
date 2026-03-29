@@ -40,8 +40,9 @@ Execution:
 5. if Safari already has a good PlayStation session, enable `Allow JavaScript from Apple Events` in Safari's Developer settings and run:
    - `npm run auth:safari-summary`
    - `npm run auth:safari-endpoints`
-   - `npm run api:playstation-web -- probe`
-   - `npm run api:playstation-web-summary`
+   - `npm run api:playstation-web -- probe --ids io.user.details,session.redirect.session --delay-ms 4000 --out artifacts/api/playstation-web-low-touch-report.json`
+   - `npm run api:playstation-web-summary artifacts/api/playstation-web-low-touch-report.json artifacts/api/playstation-web-low-touch-summary.json`
+   - `npm run research:control-plane`
    - inspect `artifacts/auth/safari-endpoint-report.json` for normalized host/path/query-key inventories
    - inspect `artifacts/api/playstation-web-probe-report.json` for redacted API probe outcomes
    - inspect `artifacts/api/playstation-web-probe-summary.json` for classification totals

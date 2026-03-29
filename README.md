@@ -51,6 +51,7 @@ To use PSN credentials for official-login experiments, place them in `.env` afte
 ```bash
 npm run research:public        # fetch public capability pages and normalize findings
 npm run research:web-assets    # inspect first-party web JS/JSON assets referenced by Safari session summary
+npm run research:control-plane # synthesize a browser control-plane snapshot from local artifacts
 npm run test:unit              # unit tests for auth/endpoint normalization logic
 npm run test:public            # verify collected public evidence has expected capability signals
 npm run env:check              # show readiness for login, bundle, and capture workflows
@@ -60,8 +61,9 @@ npm run auth:psn-summary       # create a redacted auth artifact summary from lo
 npm run auth:safari-summary    # summarize Safari PlayStation tabs when JS from Apple Events is enabled
 npm run auth:safari-endpoints  # normalize Safari resource URLs into a redacted endpoint report
 npm run api:playstation-web -- list
-npm run api:playstation-web -- probe
+npm run api:playstation-web -- probe --ids io.user.details,session.redirect.session --delay-ms 4000
 npm run api:playstation-web-summary
+npm run research:control-plane
 npm run inspect:bundle -- /path/to/app.asar
 npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe
 npm run capture:metadata       # local tcpdump wrapper for sanctioned traffic metadata capture
@@ -79,4 +81,5 @@ npm run summarize:metadata -- artifacts/network/<capture>.pcap
 
 - `.env` is ignored. Use `.env.example` as the template.
 - Generated captures, storage states, screenshots, and pcaps stay under `artifacts/` and are ignored.
+- For authenticated browser-session probes, prefer subset runs via `--ids` and keep several seconds between requests.
 - The implementation path documented here assumes clean-room interoperability research only.
