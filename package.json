@@ -1,0 +1,27 @@
+{
+  "name": "ps-wen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Research harness for PlayStation cloud streaming capability validation and clean-room implementation planning.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run build && npm run research:public && npm run test:public",
+    "research:public": "tsx scripts/public/fetch-official-capabilities.ts",
+    "test:public": "playwright test tests/psplus-public.spec.ts",
+    "test:psn-login": "playwright test tests/psn-login-smoke.spec.ts --project=chromium",
+    "inspect:bundle": "tsx scripts/static/inventory-client-bundle.ts",
+    "capture:metadata": "bash scripts/network/capture-session-metadata.sh",
+    "summarize:metadata": "bash scripts/network/summarize-pcap.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.0",
+    "@types/node": "^24.6.0",
+    "@electron/asar": "^4.0.1",
+    "cheerio": "^1.1.2",
+    "dotenv": "^17.2.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2",
+    "zod": "^4.1.5"
+  }
+}
