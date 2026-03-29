@@ -68,6 +68,8 @@ npm run research:graphql-docs
 npm run research:control-plane
 npm run inspect:bundle -- /path/to/app.asar
 npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe
+npm run inspect:pc-app         # summarize the installed Windows PlayStation Plus shell + broker surface
+npm run auth:pc-app-summary    # write a redacted PC-app auth/storage summary from local Windows artifacts
 npm run capture:metadata       # local tcpdump wrapper for sanctioned traffic metadata capture
 npm run summarize:metadata -- artifacts/network/<capture>.pcap
 ```
