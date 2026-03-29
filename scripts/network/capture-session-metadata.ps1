@@ -22,11 +22,16 @@ $fileSizeValue = if ($env:CAPTURE_FILE_SIZE_MB) { $env:CAPTURE_FILE_SIZE_MB } el
 $portsValue = if ($env:CAPTURE_WINDOWS_PORTS) { $env:CAPTURE_WINDOWS_PORTS } else { '53,443' }
 $durationSeconds = [int]$durationValue
 $fileSizeMb = [int]$fileSizeValue
-$portList = (($portsValue -split '[, ]+') | Where-Object { $_ }) | ForEach-Object { [int]$_ }
+$captureAllPorts = $portsValue.Trim().ToLower() -in @('all', 'any', '*')
+$portList = if ($captureAllPorts) {
+  @()
+} else {
+  (($portsValue -split '[, ]+') | Where-Object { $_ }) | ForEach-Object { [int]$_ }
+}
 
 Write-Host '[ps-wen] Capturing local metadata with pktmon'
 Write-Host ('  duration : {0} seconds' -f $durationSeconds)
-Write-Host ('  ports    : {0}' -f ($portList -join ', '))
+Write-Host ('  ports    : {0}' -f $(if ($captureAllPorts) { 'all' } else { $portList -join ', ' }))
 Write-Host ('  etl      : {0}' -f $etlPath)
 Write-Host ('  pcapng   : {0}' -f $pcapngPath)
 Write-Host
@@ -40,14 +45,16 @@ try {
   pktmon stop | Out-Null
   pktmon filter remove | Out-Null
 
-  foreach ($port in $portList) {
-    if ($port -eq 53) {
-      pktmon filter add ("udp-{0}" -f $port) -t UDP -p $port | Out-Null
-      continue
-    }
+  if (-not $captureAllPorts) {
+    foreach ($port in $portList) {
+      if ($port -eq 53) {
+        pktmon filter add ("udp-{0}" -f $port) -t UDP -p $port | Out-Null
+        continue
+      }
 
-    pktmon filter add ("tcp-{0}" -f $port) -t TCP -p $port | Out-Null
-    pktmon filter add ("udp-{0}" -f $port) -t UDP -p $port | Out-Null
+      pktmon filter add ("tcp-{0}" -f $port) -t TCP -p $port | Out-Null
+      pktmon filter add ("udp-{0}" -f $port) -t UDP -p $port | Out-Null
+    }
   }
 
   pktmon start --capture --comp nics --pkt-size 0 --file-name $etlPath --file-size $fileSizeMb | Out-Null
