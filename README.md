@@ -66,6 +66,9 @@ npm run api:psn-direct -- broker                  # localhost:1235 broker reacha
 npm run api:psn-direct -- broker send requestClientId --wait-ms 1500
 npm run api:psn-direct -- broker send setSettings '{"apolloSessionId":"...","entitlementID":"..."}'
 npm run api:psn-direct -- broker send --raw '{"command":"requestClientId","params":{}}'
+npm run broker:emulator                          # local mock broker on ws://localhost:1235/, no official app required
+npm run broker:emulator -- --out artifacts/broker/mock-broker-session.jsonl
+  # logs all frames and emits mocked replies for testConnection/requestClientId/setSettings/setAuthCodes/requestGame/startGame
 npm run api:psn-direct -- gaikai id               # mint Gaikai apolloId / clientSessionId
 npm run api:psn-direct -- gaikai config           # fetch + decode config.cc.prod.gaikai.com/v1/config
 npm run api:psn-direct -- gaikai auth-code --kind cloud

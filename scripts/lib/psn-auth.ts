@@ -27,6 +27,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -1244,37 +1245,73 @@ export async function queryKamajiUserEntitlements(
 
 /**
  * Check whether the localhost broker WebSocket is reachable.
- * Uses an HTTP upgrade check via the known WebSocket URL.
- * Does not require the 'websocket' npm package — just checks TCP reachability
- * via a plain GET to the WS endpoint (expecting a 101 or 400).
+ * Uses a raw TCP HTTP-upgrade probe so valid `101 Switching Protocols`
+ * responses are treated as success instead of surfacing as fetch-level errors.
  */
 export async function probeBrokerReachability(
   host = 'localhost',
   port = 1235
 ): Promise<BrokerProbeResult> {
-  const url = `http://${host}:${port}/`;
+  const wsUrl = `ws://${host}:${port}/`;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(url, {
-      headers: {
-        Upgrade: 'websocket',
-        Connection: 'Upgrade',
-        'Sec-WebSocket-Key': Buffer.from(crypto.randomBytes(16)).toString('base64'),
-        'Sec-WebSocket-Version': '13',
-      },
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timeout));
-    // 101 = upgraded, 400 = bad request but port is open, both mean reachable
+    const statusCode = await new Promise<number>((resolve, reject) => {
+      const socket = net.connect({ host, port });
+      let settled = false;
+      let responseBuffer = '';
+
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        socket.removeAllListeners();
+        socket.destroy();
+        fn();
+      };
+
+      socket.setTimeout(3000, () => {
+        finish(() => reject(new Error('timed out')));
+      });
+
+      socket.once('error', (error) => {
+        finish(() => reject(error));
+      });
+
+      socket.once('connect', () => {
+        const request = [
+          'GET / HTTP/1.1',
+          `Host: ${host}:${port}`,
+          'Upgrade: websocket',
+          'Connection: Upgrade',
+          `Sec-WebSocket-Key: ${Buffer.from(crypto.randomBytes(16)).toString('base64')}`,
+          'Sec-WebSocket-Version: 13',
+          '',
+          '',
+        ].join('\r\n');
+        socket.write(request);
+      });
+
+      socket.on('data', (chunk) => {
+        responseBuffer += Buffer.from(chunk).toString('utf8');
+        const lineEnd = responseBuffer.indexOf('\r\n');
+        if (lineEnd === -1) return;
+        const statusLine = responseBuffer.slice(0, lineEnd);
+        const match = statusLine.match(/^HTTP\/1\.[01]\s+(\d{3})\b/);
+        if (!match) {
+          finish(() => reject(new Error(`Unexpected HTTP response: ${statusLine}`)));
+          return;
+        }
+        finish(() => resolve(Number(match[1])));
+      });
+    });
+
     return {
-      reachable: response.status === 101 || response.status === 400,
-      url: `ws://${host}:${port}/`,
+      reachable: statusCode === 101 || statusCode === 400,
+      url: wsUrl,
       probedAt: new Date().toISOString(),
     };
   } catch (error) {
     return {
       reachable: false,
-      url: `ws://${host}:${port}/`,
+      url: wsUrl,
       probedAt: new Date().toISOString(),
       error: error instanceof Error ? error.message : String(error),
     };

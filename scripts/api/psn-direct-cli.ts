@@ -1119,7 +1119,7 @@ async function cmdBroker(parsed: ParsedArgs) {
     ...probe,
     notes: probe.reachable
       ? [
-          'PlayStation Plus broker is reachable. The native client is running.',
+          'A broker is reachable on the expected localhost endpoint. This may be the official runtime or a compatible mock broker.',
           'Known preload commands from asar: startGame, stop, requestGame, requestClientId, testConnection, setAuthCodes, setSettings, sendXmbCommand, routeInputToPlayer, routeInputToClient, saveDataDeepLink, rawDataDeepLink, invitationDeepLink, gameAlertDeepLink, systemStatusDeepLink.',
           'Use `broker send <command>` to try live command replay.',
           'Observed window events: blur, focus.',
