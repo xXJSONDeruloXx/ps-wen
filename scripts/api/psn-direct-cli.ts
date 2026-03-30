@@ -23,6 +23,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   readLocalPsnCookies,
+  resolveNpsso,
   exchangeNpssoForToken,
   exchangeNpssoForCode,
   queryKamajiGeo,
@@ -36,14 +37,20 @@ import {
   PSN_OAUTH_CLIENTS,
   type PsnOAuthClientId,
 } from '../lib/psn-auth.js';
-import { resolveArtifactPath } from '../lib/env.js';
+import { loadEnv, resolveArtifactPath } from '../lib/env.js';
 
+const env = loadEnv();
 const DEFAULT_TOKEN_OUT = 'artifacts/auth/psn-token-exchange.json';
 
 type ParsedArgs = {
   command?: string;
   positional: string[];
   flags: Record<string, string | true>;
+};
+
+type NpssoResolution = {
+  npsso: string;
+  source: 'flag' | 'storage-state' | 'app-db' | 'none';
 };
 
 function usage(): never {
@@ -61,6 +68,11 @@ function usage(): never {
       '  npm run api:psn-direct -- session-probe [--json]',
       '  npm run api:psn-direct -- broker [--host localhost] [--port 1235] [--json]',
       '  npm run api:psn-direct -- status [--json]',
+      '',
+      'Global NPSSO sources (checked in this order):',
+      '  --npsso <value>',
+      '  --storage-state <playwright-storage-state.json>',
+      '  local Sony app cookie DB (legacy fallback)',
       '',
       'Client names map to observed OAuth client IDs and scopes:',
       ...Object.entries(PSN_OAUTH_CLIENTS).map(
@@ -93,6 +105,36 @@ async function writeArtifact(data: unknown, outputPath: string) {
   await fs.writeFile(outputPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 
+function resolvedStorageStatePath(parsed: ParsedArgs): string | undefined {
+  const flagPath = typeof parsed.flags['storage-state'] === 'string' ? parsed.flags['storage-state'] : undefined;
+  const envPath = env.PSN_STORAGE_STATE;
+  const rawPath = flagPath ?? envPath;
+  return rawPath ? resolveArtifactPath(rawPath, rawPath) : undefined;
+}
+
+async function getNpsso(parsed: ParsedArgs): Promise<NpssoResolution> {
+  return resolveNpsso({
+    explicitNpsso:
+      typeof parsed.flags.npsso === 'string' ? parsed.flags.npsso : env.PSN_NPSSO,
+    storageStatePath: resolvedStorageStatePath(parsed),
+  });
+}
+
+function missingNpssoMessage(parsed: ParsedArgs): string {
+  const storageStatePath = resolvedStorageStatePath(parsed);
+  return [
+    'No NPSSO found.',
+    storageStatePath
+      ? `Checked Playwright storage-state: ${storageStatePath}`
+      : 'No Playwright storage-state path was provided.',
+    'Acquire NPSSO app-free via the official browser login flow:',
+    '  1. npm run auth:psn-headed',
+    '  2. complete Sony sign-in in the opened browser',
+    '  3. npm run auth:extract-npsso',
+    'Then re-run this command with --storage-state artifacts/auth/playstation-storage-state.json',
+  ].join(' ');
+}
+
 // ---------------------------------------------------------------------------
 // token  — exchange NPSSO for a fresh bearer token
 // ---------------------------------------------------------------------------
@@ -102,15 +144,15 @@ async function cmdToken(parsed: ParsedArgs) {
     throw new Error(`Unknown client name: "${clientName}". Valid: ${Object.keys(PSN_OAUTH_CLIENTS).join(', ')}`);
   }
 
-  const cookies = await readLocalPsnCookies();
-  if (!cookies.roaming.npsso) {
-    throw new Error('No NPSSO cookie found. Ensure the PlayStation Plus app has been logged in.');
+  const { npsso, source } = await getNpsso(parsed);
+  if (!npsso) {
+    throw new Error(missingNpssoMessage(parsed));
   }
 
   const client = PSN_OAUTH_CLIENTS[clientName];
 
   if (client.responseType === 'token') {
-    const exchange = await exchangeNpssoForToken(cookies.roaming.npsso, clientName);
+    const exchange = await exchangeNpssoForToken(npsso, clientName);
     const result = {
       generatedAt: exchange.obtainedAt,
       kind: 'access_token' as const,
@@ -122,6 +164,7 @@ async function cmdToken(parsed: ParsedArgs) {
       expiresAt: new Date(Date.now() + exchange.expiresIn * 1000).toISOString(),
       scope: exchange.scope,
       correlationId: exchange.correlationId,
+      npssoSource: source,
     };
 
     if (parsed.flags.out || !asJson(parsed)) {
@@ -140,9 +183,10 @@ async function cmdToken(parsed: ParsedArgs) {
     console.log(`Expires in   : ${result.expiresIn}s`);
     console.log(`Scope        : ${result.scope}`);
     console.log(`Access token : ${result.accessToken.slice(0, 8)}...`);
+    console.log(`NPSSO source : ${result.npssoSource}`);
 
   } else {
-    const exchange = await exchangeNpssoForCode(cookies.roaming.npsso, clientName);
+    const exchange = await exchangeNpssoForCode(npsso, clientName);
     const result = {
       generatedAt: exchange.obtainedAt,
       kind: 'authorization_code' as const,
@@ -151,6 +195,7 @@ async function cmdToken(parsed: ParsedArgs) {
       code: exchange.code,
       scope: exchange.scope,
       correlationId: exchange.correlationId,
+      npssoSource: source,
       note: 'Authorization codes are single-use and expire in seconds. Exchange immediately.',
     };
 
@@ -168,6 +213,7 @@ async function cmdToken(parsed: ParsedArgs) {
     console.log(`Client       : ${clientName} (${result.clientId})`);
     console.log(`Code         : ${result.code}`);
     console.log(`Scope        : ${result.scope}`);
+    console.log(`NPSSO source : ${result.npssoSource}`);
     console.log('(Single-use auth code — use it immediately for session init)');
   }
 }
@@ -176,12 +222,12 @@ async function cmdToken(parsed: ParsedArgs) {
 // geo  — query Kamaji geo endpoint (works with bearer token only)
 // ---------------------------------------------------------------------------
 async function cmdGeo(parsed: ParsedArgs) {
-  const cookies = await readLocalPsnCookies();
+  const { npsso } = await getNpsso(parsed);
   let token: string | undefined;
 
-  if (cookies.roaming.npsso) {
+  if (npsso) {
     try {
-      const exchange = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
+      const exchange = await exchangeNpssoForToken(npsso, 'entitlements');
       token = exchange.accessToken;
     } catch {
       // geo works without a token too, fall through
@@ -208,9 +254,9 @@ async function cmdGeo(parsed: ParsedArgs) {
 const DEFAULT_SESSION_OUT = 'artifacts/auth/psn-kamaji-session.json';
 
 async function cmdSession(parsed: ParsedArgs) {
-  const cookies = await readLocalPsnCookies();
-  if (!cookies.roaming.npsso) {
-    throw new Error('No NPSSO found. Ensure the PlayStation Plus app has been logged in.');
+  const { npsso, source } = await getNpsso(parsed);
+  if (!npsso) {
+    throw new Error(missingNpssoMessage(parsed));
   }
 
   const mode    = typeof parsed.flags.mode === 'string' ? parsed.flags.mode : 'token';
@@ -218,14 +264,15 @@ async function cmdSession(parsed: ParsedArgs) {
   const country = typeof parsed.flags.country === 'string' ? parsed.flags.country : 'US';
   const lang    = typeof parsed.flags.lang    === 'string' ? parsed.flags.lang    : 'en';
 
-  const tokenResult = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
+  const tokenResult = await exchangeNpssoForToken(npsso, 'entitlements');
   const session = mode === 'guest'
-    ? await establishKamajiSession(cookies.roaming.npsso, dob, country, lang)
-    : await establishKamajiAccessTokenSession(cookies.roaming.npsso, tokenResult.accessToken);
+    ? await establishKamajiSession(npsso, dob, country, lang)
+    : await establishKamajiAccessTokenSession(npsso, tokenResult.accessToken);
 
   const result = {
     generatedAt: session.establishedAt,
     mode,
+    npssoSource: source,
     jsessionId: session.jsessionId,
     webduid: session.webduid,
     sessionUrl: session.sessionUrl,
@@ -260,6 +307,7 @@ async function cmdSession(parsed: ParsedArgs) {
 
   console.log(`[psn-direct] Wrote: ${outputPath}`);
   console.log(`Mode              : ${mode}`);
+  console.log(`NPSSO source      : ${source}`);
   console.log(`JSESSIONID        : ${session.jsessionId.slice(0, 16)}...`);
   console.log(`WEBDUID           : ${session.webduid.slice(0, 20)}...`);
   console.log(`Session URL       : ${session.sessionUrl}`);
@@ -275,9 +323,9 @@ async function cmdSession(parsed: ParsedArgs) {
 // stores  — fetch store/catalog URL map (works with guest session)
 // ---------------------------------------------------------------------------
 async function cmdStores(parsed: ParsedArgs) {
-  const cookies = await readLocalPsnCookies();
-  if (!cookies.roaming.npsso) {
-    throw new Error('No NPSSO found.');
+  const { npsso } = await getNpsso(parsed);
+  if (!npsso) {
+    throw new Error(missingNpssoMessage(parsed));
   }
 
   const mode    = typeof parsed.flags.mode === 'string' ? parsed.flags.mode : 'token';
@@ -285,10 +333,10 @@ async function cmdStores(parsed: ParsedArgs) {
   const country = typeof parsed.flags.country === 'string' ? parsed.flags.country : 'US';
   const lang    = typeof parsed.flags.lang    === 'string' ? parsed.flags.lang    : 'en';
 
-  const tokenResult = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
+  const tokenResult = await exchangeNpssoForToken(npsso, 'entitlements');
   const session = mode === 'guest'
-    ? await establishKamajiSession(cookies.roaming.npsso, dob, country, lang)
-    : await establishKamajiAccessTokenSession(cookies.roaming.npsso, tokenResult.accessToken);
+    ? await establishKamajiSession(npsso, dob, country, lang)
+    : await establishKamajiAccessTokenSession(npsso, tokenResult.accessToken);
 
   const stores = await queryKamajiUserStores(
     tokenResult.accessToken,
@@ -313,10 +361,10 @@ async function cmdStores(parsed: ParsedArgs) {
 // profile  — fetch recognized account profile via access-token session
 // ---------------------------------------------------------------------------
 async function cmdProfile(parsed: ParsedArgs) {
-  const cookies = await readLocalPsnCookies();
-  if (!cookies.roaming.npsso) throw new Error('No NPSSO found.');
-  const token = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
-  const session = await establishKamajiAccessTokenSession(cookies.roaming.npsso, token.accessToken);
+  const { npsso } = await getNpsso(parsed);
+  if (!npsso) throw new Error(missingNpssoMessage(parsed));
+  const token = await exchangeNpssoForToken(npsso, 'entitlements');
+  const session = await establishKamajiAccessTokenSession(npsso, token.accessToken);
   const profile = await queryKamajiUserProfile(token.accessToken, session.jsessionId, session.webduid);
   if (asJson(parsed)) { console.log(JSON.stringify(profile, null, 2)); return; }
   console.log(`Online ID         : ${profile.onlineId}`);
@@ -329,11 +377,11 @@ async function cmdProfile(parsed: ParsedArgs) {
 // entitlements  — fetch live entitlement inventory via access-token session
 // ---------------------------------------------------------------------------
 async function cmdEntitlements(parsed: ParsedArgs) {
-  const cookies = await readLocalPsnCookies();
-  if (!cookies.roaming.npsso) throw new Error('No NPSSO found.');
+  const { npsso } = await getNpsso(parsed);
+  if (!npsso) throw new Error(missingNpssoMessage(parsed));
   const limit = typeof parsed.flags.limit === 'string' ? parseInt(parsed.flags.limit, 10) : 20;
-  const token = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
-  const session = await establishKamajiAccessTokenSession(cookies.roaming.npsso, token.accessToken);
+  const token = await exchangeNpssoForToken(npsso, 'entitlements');
+  const session = await establishKamajiAccessTokenSession(npsso, token.accessToken);
   const data = await queryKamajiUserEntitlements(token.accessToken, session.jsessionId, session.webduid);
   if (asJson(parsed)) { console.log(JSON.stringify(data, null, 2)); return; }
   console.log(`Total entitlements: ${data.totalResults}`);
@@ -370,8 +418,8 @@ async function cmdManifest(parsed: ParsedArgs) {
 // catalog  — browse the live game catalog (guest session sufficient)
 // ---------------------------------------------------------------------------
 async function cmdCatalog(parsed: ParsedArgs) {
-  const cookies = await readLocalPsnCookies();
-  if (!cookies.roaming.npsso) throw new Error('No NPSSO found.');
+  const { npsso } = await getNpsso(parsed);
+  if (!npsso) throw new Error(missingNpssoMessage(parsed));
   const dob     = typeof parsed.flags.dob     === 'string' ? parsed.flags.dob     : '1981-01-01';
   const country = typeof parsed.flags.country === 'string' ? parsed.flags.country : 'US';
   const lang    = typeof parsed.flags.lang    === 'string' ? parsed.flags.lang    : 'en';
@@ -379,8 +427,8 @@ async function cmdCatalog(parsed: ParsedArgs) {
   const size    = typeof parsed.flags.size    === 'string' ? parseInt(parsed.flags.size, 10) : 20;
 
   const [tokenResult, session] = await Promise.all([
-    exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements'),
-    establishKamajiSession(cookies.roaming.npsso, dob, country, lang),
+    exchangeNpssoForToken(npsso, 'entitlements'),
+    establishKamajiSession(npsso, dob, country, lang),
   ]);
   const cookieStr = `JSESSIONID=${session.jsessionId}; WEBDUID=${session.webduid}`;
   const url = `https://psnow.playstation.com/store/api/pcnow/00_09_000/container/${country}/${lang}/19/${cat}?size=${size}&start=0`;
@@ -416,13 +464,13 @@ async function cmdCatalog(parsed: ParsedArgs) {
 // session-probe  — probe Kamaji session state with live credentials
 // ---------------------------------------------------------------------------
 async function cmdSessionProbe(parsed: ParsedArgs) {
-  const cookies = await readLocalPsnCookies();
-  if (!cookies.roaming.npsso) {
-    throw new Error('No NPSSO found. Cannot probe session state.');
+  const { npsso } = await getNpsso(parsed);
+  if (!npsso) {
+    throw new Error(missingNpssoMessage(parsed));
   }
 
-  const exchange = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
-  const session = await establishKamajiAccessTokenSession(cookies.roaming.npsso, exchange.accessToken);
+  const exchange = await exchangeNpssoForToken(npsso, 'entitlements');
+  const session = await establishKamajiAccessTokenSession(npsso, exchange.accessToken);
 
   let profileOk = false;
   let entitlementsOk = false;
@@ -540,7 +588,8 @@ async function cmdBroker(parsed: ParsedArgs) {
 // ---------------------------------------------------------------------------
 async function cmdStatus(parsed: ParsedArgs) {
   const cookies = await readLocalPsnCookies();
-  const hasNpsso = Boolean(cookies.roaming.npsso);
+  const npssoResolution = await getNpsso(parsed);
+  const hasNpsso = Boolean(npssoResolution.npsso);
 
   let tokenResult: { obtained: boolean; expiresIn?: number; scope?: string; error?: string } = {
     obtained: false,
@@ -554,7 +603,7 @@ async function cmdStatus(parsed: ParsedArgs) {
 
   if (hasNpsso) {
     try {
-      const exchange = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
+      const exchange = await exchangeNpssoForToken(npssoResolution.npsso, 'entitlements');
       tokenResult = { obtained: true, expiresIn: exchange.expiresIn, scope: exchange.scope };
 
       const [geo, session, broker] = await Promise.allSettled([
@@ -594,6 +643,7 @@ async function cmdStatus(parsed: ParsedArgs) {
     generatedAt: new Date().toISOString(),
     auth: {
       npssoPresent: hasNpsso,
+      npssoSource: hasNpsso ? npssoResolution.source : null,
       freshTokenObtained: tokenResult.obtained,
       tokenScope: tokenResult.scope ?? null,
       tokenExpiresIn: tokenResult.expiresIn ?? null,
@@ -619,6 +669,7 @@ async function cmdStatus(parsed: ParsedArgs) {
 
   console.log(`[psn-direct] Auth surface status`);
   console.log(`NPSSO present      : ${summary.auth.npssoPresent}`);
+  console.log(`NPSSO source       : ${summary.auth.npssoSource ?? 'n/a'}`);
   console.log(`Fresh token ready  : ${summary.auth.freshTokenObtained}${summary.auth.tokenError ? ` (${summary.auth.tokenError})` : ''}`);
   console.log(`Token expires in   : ${summary.auth.tokenExpiresIn ? `${summary.auth.tokenExpiresIn}s` : 'n/a'}`);
   console.log(`Geo region         : ${summary.geo.region ?? summary.geo.error ?? 'n/a'}`);
@@ -630,7 +681,9 @@ async function cmdStatus(parsed: ParsedArgs) {
   console.log('');
 
   if (!summary.auth.freshTokenObtained) {
-    console.log('→ NPSSO missing or expired. Log in via the PS Plus app to refresh.');
+    console.log('→ NPSSO missing or expired. Acquire it via the official web login flow:');
+    console.log('→   npm run auth:psn-headed');
+    console.log('→   npm run auth:extract-npsso');
   } else if (summary.session.status === 'session-expired') {
     console.log('→ Kamaji session expired. Launch the PS Plus app to re-establish.');
     console.log('→ Once running, re-run this command to confirm session-active.');

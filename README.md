@@ -86,7 +86,8 @@ npm run research:pc-app-apollo # extract Kamaji/account/API config hints from li
 npm run research:control-plane # synthesize a browser control-plane snapshot from local artifacts
 
 # ── Auth / session capture ────────────────────────────────────────────────────
-npm run auth:psn-headed        # headed/manual login helper that dumps cookies + storage locally
+npm run auth:psn-headed        # headed/manual Sony login helper; writes Playwright storage-state
+npm run auth:extract-npsso     # confirm/extract NPSSO from Playwright storage-state
 npm run auth:psn-summary       # create a redacted auth artifact summary from local captures
 npm run auth:safari-summary    # summarize Safari PlayStation tabs (macOS, JS from Apple Events)
 npm run auth:safari-endpoints  # normalize Safari resource URLs into a redacted endpoint report
@@ -114,6 +115,25 @@ npm run test:public            # verify collected public evidence has expected s
 npm run test:psn-login         # official login smoke harness using Playwright
 npm run env:check              # show readiness for login, bundle, and capture workflows
 ```
+
+## App-free NPSSO acquisition
+
+NPSSO is not generated locally by this repo. It is minted by Sony after a real
+account login. The app-free retrieval path is:
+
+```bash
+npm run auth:psn-headed
+# complete sign-in in the opened browser window
+
+npm run auth:extract-npsso
+# confirms NPSSO was captured in artifacts/auth/playstation-storage-state.json
+
+npm run api:psn-direct -- profile --storage-state artifacts/auth/playstation-storage-state.json
+```
+
+That path uses the official Sony web login plus Playwright storage-state, not
+Sony's proprietary PC app.
+
 
 ## Initial deliverables in this commit series
 

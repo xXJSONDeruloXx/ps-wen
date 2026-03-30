@@ -15,6 +15,7 @@ const EnvSchema = z.object({
   PSN_LOGIN_URL: z.string().optional(),
   PSN_POST_LOGIN_URL: z.string().optional(),
   PSN_STORAGE_STATE: z.string().optional(),
+  PSN_NPSSO: z.string().optional(),
   OFFICIAL_PC_APP_BUNDLE: z.string().optional(),
   PLAYSTATION_PLUS_INSTALL_ROOT: z.string().optional(),
   PLAYSTATION_PLUS_SETTINGS_DIR: z.string().optional(),

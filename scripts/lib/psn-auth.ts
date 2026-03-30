@@ -186,6 +186,56 @@ export type PsnLocalCookies = {
   qtWebEngine: PsnSessionCookies;
 };
 
+export type BrowserStorageStateCookie = {
+  name?: string;
+  value?: string;
+  domain?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: string;
+};
+
+export async function readNpssoFromStorageState(storageStatePath: string): Promise<string> {
+  const raw = await fs.readFile(storageStatePath, 'utf8');
+  const json = JSON.parse(raw) as { cookies?: BrowserStorageStateCookie[] };
+  const cookie = (json.cookies ?? []).find(
+    (c) => c.name === 'npsso' && /sony\.com|playstation\.com/i.test(String(c.domain ?? ''))
+  );
+  return String(cookie?.value ?? '');
+}
+
+export async function resolveNpsso(options?: {
+  explicitNpsso?: string;
+  storageStatePath?: string;
+  roamingCookiesPath?: string;
+  qtCookiesPath?: string;
+}): Promise<{ npsso: string; source: 'flag' | 'storage-state' | 'app-db' | 'none' }> {
+  const explicitNpsso = options?.explicitNpsso?.trim();
+  if (explicitNpsso) {
+    return { npsso: explicitNpsso, source: 'flag' };
+  }
+
+  const storageStatePath = options?.storageStatePath?.trim();
+  if (storageStatePath) {
+    const npsso = await readNpssoFromStorageState(storageStatePath).catch(() => '');
+    if (npsso) {
+      return { npsso, source: 'storage-state' };
+    }
+  }
+
+  const cookies = await readLocalPsnCookies({
+    roamingCookiesPath: options?.roamingCookiesPath,
+    qtCookiesPath: options?.qtCookiesPath,
+  });
+  if (cookies.roaming.npsso) {
+    return { npsso: cookies.roaming.npsso, source: 'app-db' };
+  }
+
+  return { npsso: '', source: 'none' };
+}
+
 /**
  * Read all auth-relevant cookies from both on-disk SQLite databases.
  * Safe to call while the PlayStation Plus app is running.

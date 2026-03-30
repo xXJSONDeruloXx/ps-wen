@@ -19,6 +19,7 @@
     "test:public": "playwright test tests/psplus-public.spec.ts",
     "test:psn-login": "playwright test tests/psn-login-smoke.spec.ts --project=chromium",
     "auth:psn-headed": "tsx scripts/auth/manual-psn-login.ts",
+    "auth:extract-npsso": "tsx scripts/auth/extract-npsso.ts",
     "auth:psn-summary": "tsx scripts/auth/summarize-capture.ts",
     "auth:safari-summary": "tsx scripts/auth/safari-session-summary.ts",
     "auth:safari-endpoints": "tsx scripts/auth/normalize-safari-endpoints.ts",

@@ -141,6 +141,8 @@ async function main() {
     bodyText = '';
   }
 
+  const npssoCookie = cookies.find((cookie) => cookie.name === 'npsso');
+
   const dump = {
     generatedAt: new Date().toISOString(),
     detectedSignInCompletion: detected,
@@ -148,9 +150,12 @@ async function main() {
     pages,
     sonyCookieCount: cookies.filter((cookie) => /sony|playstation/i.test(cookie.domain)).length,
     authLikeCookieNames: cookies
-      .filter((cookie) => /my\.account\.sony\.com/i.test(cookie.domain) || /kp_|token|sess|auth|login/i.test(cookie.name))
+      .filter((cookie) => /my\.account\.sony\.com/i.test(cookie.domain) || /kp_|token|sess|auth|login|npsso/i.test(cookie.name))
       .map((cookie) => `${cookie.domain}:${cookie.name}`),
     signInPromptVisible: /sign in to your psn account|create psn account/i.test(bodyText),
+    npssoPresent: Boolean(npssoCookie?.value),
+    npssoLength: npssoCookie?.value?.length ?? 0,
+    npssoDomain: npssoCookie?.domain ?? null,
     originStorage,
     storageStatePath,
     screenshotPath
@@ -163,6 +168,10 @@ async function main() {
   console.log(`[ps-wen] Wrote ${dumpPath}`);
   console.log(`[ps-wen] Wrote ${summaryPath}`);
   console.log(`[ps-wen] Wrote ${screenshotPath}`);
+  console.log(`[ps-wen] NPSSO captured: ${dump.npssoPresent ? `yes (${dump.npssoLength} chars on ${dump.npssoDomain})` : 'no'}`);
+  if (dump.npssoPresent) {
+    console.log('[ps-wen] Next: npm run auth:extract-npsso');
+  }
 
   if (!autoClose) {
     console.log('[ps-wen] Leaving browser open. Close the browser window when you are done reviewing.');
