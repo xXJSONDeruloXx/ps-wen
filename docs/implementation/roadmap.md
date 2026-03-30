@@ -78,8 +78,17 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
   - Two new client IDs found: `df10acc0` (browser/pachirisu/luxray), `1045850d` (zapdos/jolteon)
 - **Done**: GrandCentral SDK (`grandcentral.js`, 534KB) fetched and saved
   - Fully obfuscated — no plaintext paths survive; Playwright intercept was necessary
-- **Done**: `session` and `stores` commands added to `psn-direct-cli.ts`
+- **Done**: `session`, `stores`, `manifest`, and `catalog` commands added to `psn-direct-cli.ts`
+- **Done**: app manifest endpoint confirmed live
+  - `GET /exp-manifest/ms/pc/1.0/apollo/application/json/manifest`
+  - returns app version map, env URLs, and PS Plus deep-link category IDs by region
+- **Done**: store catalog confirmed live with guest session
+  - `GET /store/api/pcnow/00_09_000/container/US/en/19/STORE-MSF192018-APOLLOROOT`
+  - full browseable category tree confirmed (Must Play, Action, Sports, Adventure, Shooter, Racing, RPG, Puzzle, Kids & Family, Fighting, Simulation, Strategy, Remasters, PSP/PS1/PS2, PS3, alphabetical ranges)
+  - `STORE-MSF192018-PLUSDEALS` returned live counts: 497 games, 113 bundles, 72 add-ons, 1 avatar
 - **Done**: `auth:intercept-session` Playwright interceptor script
+  - broader intercept confirmed full GrandCentral startup sequence including Akamai sensor POSTs to `/ELdff8h5I1y7/...`, manifest fetch, OAuth GET, and session POST to `/user/session`
+  - recognition blocker identified: cross-domain `ca.account.sony.com/ELdff8h5I1y7/...` load returns 403 in plain browser context; native Electron WebView likely required
   - `token` — NPSSO → bearer token or auth code
   - `geo` — live Kamaji geo query
   - `session-probe` — Kamaji session health with actionable guidance

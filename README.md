@@ -52,12 +52,15 @@ npm run api:psn-direct -- geo                     # live Kamaji geo: region, tim
 npm run api:psn-direct -- session                 # establish fresh JSESSIONID + WEBDUID from NPSSO
 npm run api:psn-direct -- session --dob 1990-06-15 # supply DOB if default doesn't match your account
 npm run api:psn-direct -- stores                  # live store/catalog/PS-Plus URL map (guest session)
+npm run api:psn-direct -- manifest                # live exp-manifest fetch (env URLs, deep-link category IDs)
+npm run api:psn-direct -- catalog --size 20       # browse a store container (default: APOLLOROOT)
+npm run api:psn-direct -- catalog --cat STORE-MSF192018-APOLLOMUSTPLAY --size 10
 npm run api:psn-direct -- session-probe           # Kamaji session health with actionable guidance
 npm run api:psn-direct -- broker                  # localhost:1235 broker reachability + command list
 npm run api:psn-direct -- <cmd> --json            # machine-readable output for any command
 
 # ── Session intercept (Playwright) ─────────────────────────────────────────────
-npm run auth:intercept-session    # inject NPSSO into browser, intercept all GrandCentral SDK calls
+npm run auth:intercept-session    # inject NPSSO into browser, intercept GrandCentral SDK + session flow
 
 # ── Prototype CLI ─────────────────────────────────────────────────────────────
 npm run prototype:psplus -- status       # observation-backed flow state + capability map

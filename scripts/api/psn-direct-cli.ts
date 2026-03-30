@@ -51,6 +51,8 @@ function usage(): never {
       '  npm run api:psn-direct -- geo [--json]',
       '  npm run api:psn-direct -- session [--dob YYYY-MM-DD] [--country US] [--lang en] [--json]',
       '  npm run api:psn-direct -- stores [--dob YYYY-MM-DD] [--json]',
+      '  npm run api:psn-direct -- manifest [--json]',
+      '  npm run api:psn-direct -- catalog [--cat STORE-MSF192018-APOLLOROOT] [--size 20] [--dob YYYY-MM-DD] [--json]',
       '  npm run api:psn-direct -- session-probe [--json]',
       '  npm run api:psn-direct -- broker [--host localhost] [--port 1235] [--json]',
       '  npm run api:psn-direct -- status [--json]',
@@ -292,6 +294,76 @@ async function cmdStores(parsed: ParsedArgs) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// manifest  — fetch the live app manifest (no auth required)
+// ---------------------------------------------------------------------------
+async function cmdManifest(parsed: ParsedArgs) {
+  const r = await fetch(
+    'https://psnow.playstation.com/exp-manifest/ms/pc/1.0/apollo/application/json/manifest',
+    { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) gkApollo', 'Accept': 'application/json' } }
+  );
+  const json = await r.json() as Record<string, unknown>;
+  if (asJson(parsed)) { console.log(JSON.stringify(json, null, 2)); return; }
+  const app = (json.app as Record<string, unknown> | undefined) ?? {};
+  const apollo = (app.apollo as Record<string, string> | undefined) ?? {};
+  console.log(`Manifest version : ${json.version ?? '?'}`);
+  console.log(`App URL (np)     : ${apollo.np ?? apollo.default ?? '?'}`);
+  console.log(`App URL (e1-np)  : ${apollo['e1-np'] ?? '?'}`);
+  const region = (json.region as Record<string, unknown> | undefined) ?? {};
+  const siea = (region.SIEA as Record<string, Record<string, string>> | undefined)?.autorenewPSPlus ?? {};
+  if (Object.keys(siea).length) {
+    console.log('PS Plus deep links (SIEA):');
+    for (const [k, v] of Object.entries(siea)) console.log(`  ${k.padEnd(22)}: ${v}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// catalog  — browse the live game catalog (guest session sufficient)
+// ---------------------------------------------------------------------------
+async function cmdCatalog(parsed: ParsedArgs) {
+  const cookies = await readLocalPsnCookies();
+  if (!cookies.roaming.npsso) throw new Error('No NPSSO found.');
+  const dob     = typeof parsed.flags.dob     === 'string' ? parsed.flags.dob     : '1981-01-01';
+  const country = typeof parsed.flags.country === 'string' ? parsed.flags.country : 'US';
+  const lang    = typeof parsed.flags.lang    === 'string' ? parsed.flags.lang    : 'en';
+  const cat     = typeof parsed.flags.cat     === 'string' ? parsed.flags.cat     : 'STORE-MSF192018-APOLLOROOT';
+  const size    = typeof parsed.flags.size    === 'string' ? parseInt(parsed.flags.size, 10) : 20;
+
+  const [tokenResult, session] = await Promise.all([
+    exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements'),
+    establishKamajiSession(cookies.roaming.npsso, dob, country, lang),
+  ]);
+  const cookieStr = `JSESSIONID=${session.jsessionId}; WEBDUID=${session.webduid}`;
+  const url = `https://psnow.playstation.com/store/api/pcnow/00_09_000/container/${country}/${lang}/19/${cat}?size=${size}&start=0`;
+  const r = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${tokenResult.accessToken}`,
+      'Accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) gkApollo',
+      'Cookie': cookieStr,
+    }
+  });
+  const json = await r.json() as Record<string, unknown>;
+  if (asJson(parsed)) { console.log(JSON.stringify(json, null, 2)); return; }
+  const links = (json.links as Array<Record<string, unknown>> | undefined) ?? [];
+  console.log(`Container  : ${json.id ?? cat}`);
+  console.log(`Total items: ${links.length}`);
+  for (const link of links.slice(0, size)) {
+    console.log(`  ${String(link.id ?? '').padEnd(50)} ${link.name ?? ''}`);
+  }
+  if (json.attributes) {
+    const facets = (json.attributes as Record<string, unknown>)?.facets as Record<string, Array<{name:string;count:number}>>|undefined;
+    if (facets && Object.keys(facets).length) {
+      console.log('\nFacets:');
+      for (const [k, vals] of Object.entries(facets)) {
+        const summary = vals.map(v=>`${v.name}(${v.count})`).join(', ');
+        console.log(`  ${k}: ${summary}`);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // session-probe  — probe Kamaji session state with live credentials
 // ---------------------------------------------------------------------------
 async function cmdSessionProbe(parsed: ParsedArgs) {
@@ -509,6 +581,8 @@ async function main() {
   if (parsed.command === 'geo') return cmdGeo(parsed);
   if (parsed.command === 'session') return cmdSession(parsed);
   if (parsed.command === 'stores') return cmdStores(parsed);
+  if (parsed.command === 'manifest') return cmdManifest(parsed);
+  if (parsed.command === 'catalog') return cmdCatalog(parsed);
   if (parsed.command === 'session-probe') return cmdSessionProbe(parsed);
   if (parsed.command === 'broker') return cmdBroker(parsed);
   if (parsed.command === 'status') return cmdStatus(parsed);
