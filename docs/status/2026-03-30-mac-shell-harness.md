@@ -19,6 +19,11 @@ It also gives a useful interpretation for the earlier `orbis` values: `Orbis`
 was Sony's internal PS4 codename, which matches the browser/console-flavored
 `model/platform = orbis` path we observe here.
 
+A saved screenshot artifact exists, but it is still only the PlayStation Plus
+shell/splash UI — **not** a real game frame:
+
+- `artifacts/broker/shell-harness.png`
+
 ## Command
 
 ```bash
@@ -281,9 +286,12 @@ This harness does **not** prove:
 - real broker/plugin parity with the Windows runtime
 - real `streamServerClientId`
 - real `streamServerAuthCode`
-- real `startGame()` on the PC-native path
 - real media/frame decode
 - real controller-to-game input
+
+The harness **does** now prove the PC-native bundle can be driven through the
+broker-visible `startGame()` boundary, but the screenshot and DOM evidence still
+show no actual game frame.
 
 ## Remaining gap
 
@@ -302,6 +310,18 @@ The missing Windows-native pieces remain:
 - confirmation that the real runtime emits the same post-`requestGame` launch-spec / start sequence we synthesized here
 - real controller input propagation beyond routing commands
 - any true player/media runtime behavior
+
+Additional evidence pointing at a native-only media boundary:
+
+- the saved screenshot remains the Plus splash/UI rather than a rendered game frame
+- app-level `gkPlayer` handling on PC reacts to `VideoStart` primarily by flipping
+  `isStreaming` state rather than revealing a browser `<video>`/`<canvas>` stream surface
+- `PCClientAPI.showPlayer()` is implemented as:
+  - dispatch `PSN_Event_StartGame`
+  - call `plugin.startGame()`
+
+Together, that strongly suggests the actual pixels are expected to come from a
+native player/runtime rather than from a browser DOM media element on macOS.
 
 ## Best next step
 
