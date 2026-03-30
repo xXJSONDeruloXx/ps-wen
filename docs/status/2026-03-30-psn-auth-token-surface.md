@@ -15,6 +15,18 @@ the goal of this session was to:
 This document records every finding **and every wrong turn**, because the
 wrong turns reveal assumptions that will recur when building further tooling.
 
+> **Update / superseded in part:** several blocked items in this investigation
+> were resolved later the same day. See also:
+>
+> - `docs/status/2026-03-30-access-token-session.md`
+> - `docs/status/2026-03-30-auth-techniques-sweep.md`
+> - `docs/status/2026-03-30-gaikai-stream-bootstrap-probe.md`
+> - `docs/status/2026-03-30-psn-direct-gaikai-surface.md`
+>
+> In particular, standalone access-token Kamaji sessions, Gaikai `/v1/apollo/id`,
+> Gaikai `/v1/events` + `/v1/logs`, `gaikai://local` auth-code minting, and the
+> `broker send` CLI surface are now all confirmed.
+
 ---
 
 ## Auth credential storage — all five layers
@@ -399,15 +411,28 @@ during the bootstrap phase, which was not decoded in the pcapng metadata.
 
 ### Trap 8 — `config.cc.prod.gaikai.com` returning 404
 
-**Attempt:** `GET /v3/config?serviceType=psnow`
+**Original attempt:** `GET /v3/config?serviceType=psnow`
 
-**Result:** nginx 404.
+**Original result:** nginx 404.
 
-The Gaikai config endpoint path is unknown.  From the `apollo.js` code
-the GrandCentral `config` key resolves to a URL via `kamajiContainerURL`
-or similar, but the exact path is dynamically constructed and not visible
-in static analysis.  The `config.cc.prod.gaikai.com` host only had 1 TLS
-flow in the capture; the URL was not logged.
+**Later resolution:** the host is real, but the earlier guess used the wrong
+method/path.  Confirmed working later the same day:
+
+```http
+POST https://config.cc.prod.gaikai.com/v1/config
+Content-Type: application/json
+body: {}
+→ 200
+```
+
+Decoded config currently yields only telemetry/control metadata:
+
+- `logEndpoint`  → `https://client.cc.prod.gaikai.com/v1/logs`
+- `crashEndpoint` → `https://client.cc.prod.gaikai.com/v1/dump`
+- `eventEndpoint` → `https://client.cc.prod.gaikai.com/v1/events`
+
+So this trap is still useful as a record of the wrong guess, but the Gaikai
+config path is no longer unknown.
 
 ---
 
@@ -487,28 +512,44 @@ originating IP, not the user's home address.
 
 ### Confirmed blocked (requires live Kamaji session)
 
-All `/user/*` endpoints on both `psnow` and `pcnow` service types.  The
-status code `0x0005` / `Session Expired` is returned whenever either:
+**This section is superseded by the later standalone access-token session work.**
 
-- No `JSESSIONID` cookie is present
-- The `JSESSIONID` is stale (server-side session expired)
-- A `JSESSIONID` is present but was not paired with the current bearer token
+It is still true that `/user/*` endpoints fail when no valid session cookies are
+present, but re-establishing the session does **not** require launching the PS
+Plus app anymore.
 
-Re-establishing the session requires launching the PS Plus app.  After the
-app starts and completes its bootstrap, a fresh `JSESSIONID` is written to
-the Qt WebEngine cookie store.  The `session-probe` command will then report
-`session-active` and the blocked endpoints will return data.
+Later resolution:
+
+- `POST /kamaji/api/pcnow/00_09_000/user/session`
+- `Content-Type: application/x-www-form-urlencoded`
+- body: `token=<urlencoded_access_token>`
+
+That standalone flow returns fresh `JSESSIONID` + `WEBDUID` and immediately
+unlocks:
+
+- `/user/profile`
+- `/user/entitlements`
+
+with `recognizedSession` still often `false`.
+
+What remains blocked is not session establishment itself, but the final native
+launch path and any endpoints still hidden behind the broker/plugin runtime.
 
 ### Confirmed reachable but path unknown
 
 - `accounts.api.playstation.com` — 1 TLS flow observed, path unknown
 - `merchandise.api.playstation.com` — 2 TLS flows, path unknown
 - `commerce.api.np.km.playstation.net` — 2 TLS flows, path unknown
-- `config.cc.prod.gaikai.com` — 1 TLS flow, path unknown
 
-All of these need a network capture with HTTP payload logging (or a
-Playwright-based intercept while the app runs) to recover the exact
-request/response shapes.
+Later-resolved Gaikai paths:
+
+- `POST https://config.cc.prod.gaikai.com/v1/config`
+- `GET/POST https://cc.prod.gaikai.com/v1/apollo/id`
+- `POST https://client.cc.prod.gaikai.com/v1/events`
+- `POST https://client.cc.prod.gaikai.com/v1/logs`
+
+So `config.cc` is no longer path-unknown; the remaining unknowns here are mostly
+account/commerce paths and the final allocator/broker contract.
 
 ---
 
@@ -533,19 +574,17 @@ Core auth library.  Provides:
 
 ### `scripts/api/psn-direct-cli.ts`
 
-Direct API CLI.  Commands:
+Direct API CLI.  The command list shown below reflects the **initial** surface
+from this investigation.  It has since grown substantially.
 
-```
-npm run api:psn-direct -- token              # NPSSO → bearer token, writes artifact
-npm run api:psn-direct -- token --client <n> # use named client (default: entitlements)
-npm run api:psn-direct -- geo                # live Kamaji geo query
-npm run api:psn-direct -- session-probe      # Kamaji session status with guidance
-npm run api:psn-direct -- broker             # localhost:1235 reachability probe
-npm run api:psn-direct -- status             # combined snapshot of all of the above
-```
+Later-added commands now include, in addition to the original set:
+
+- `session`, `stores`, `profile`, `entitlements`, `manifest`, `catalog`
+- `broker send`
+- `gaikai id`, `gaikai config`, `gaikai auth-code`, `gaikai event`, `gaikai log`, `gaikai preflight`
 
 All commands accept `--json` for machine-readable output.
-`token` writes to `artifacts/auth/psn-token-exchange.json` by default
+`token` still writes to `artifacts/auth/psn-token-exchange.json` by default
 (overridable with `--out`).
 
 ---
@@ -564,34 +603,37 @@ All commands accept `--json` for machine-readable output.
 
 ### Unblocked pending one action (launch the app)
 
-The following are all achievable once the app is running and the
-JSESSIONID has been refreshed:
+**Superseded in part.**  Launching the app is no longer required for the
+following standalone cases:
 
-- `/user` — account ID, profile, locale, subscription tier
-- `/user/stores` — store/region assignment
-- `/user/entitlements` — game entitlement list (the primary `entitlements`
-  scope was specifically chosen for this)
-- `kamaji:s2s.subscriptionsPremium.get` — subscription premium status
+- `/user/profile`
+- `/user/entitlements`
+- `/user/stores`
+- store/catalog queries
+- Gaikai preflight (`/v1/apollo/id`, `/v1/config`, `/v1/events`, `/v1/logs`)
+- `gaikai://local` auth-code minting
 
-Workflow: launch the PS Plus app → wait for it to reach the home screen →
-`npm run api:psn-direct -- session-probe` should report `session-active` →
-manually add `/user` and `/user/entitlements` calls to the direct CLI using
-the already-working token + JSESSIONID cookie pattern.
+What app launch is still needed for is the **native broker/plugin path**:
+
+- live broker replies
+- `requestClientId`
+- `streamServerClientId`
+- native `setSettings`
+- native `setAuthCodes`
+- native `requestGame`
+- native `startGame`
 
 ### Still blocked (needs additional evidence collection)
 
-- **Kamaji session POST body format** — we know the endpoint
-  (`/kamaji/api/pcnow/00_09_000/user`) and know the commerce auth code is
-  the credential used.  We do not yet have the exact POST body schema.  A
-  Playwright intercept of the running app's first request would give this.
 - **`accounts.api.playstation.com` exact path** — 1 observed TLS flow,
   path unknown.  Needs HTTP payload capture.
-- **Gaikai control plane paths** — `cc.prod.gaikai.com` and
-  `config.cc.prod.gaikai.com` paths not yet recovered.
-- **Session allocation request/response shapes** — the primary `Blocked`
-  item from the roadmap.  Needs a targeted network capture of the
-  click-from-list → first-frame window, with tshark-level HTTP/2
-  decryption if possible.
+- **Session allocation request/response shapes** — the primary remaining
+  `Blocked` item from the roadmap.  Browser/HTTP-side preflight is now well
+  covered, but the final allocator/launch contract still needs live broker or
+  app-runtime evidence.
+- **Native broker/plugin replies** — especially the real payloads for
+  `requestClientId`, `setSettings`, `setAuthCodes`, `requestGame`, and
+  `startGame`, plus the event that yields `streamServerClientId`.
 
 ---
 
@@ -615,22 +657,22 @@ they are never committed to the repository.
 
 ## Next actions
 
-1. **Launch the app** → run `npm run api:psn-direct -- session-probe` →
-   confirm `session-active` → capture `/user` and `/user/entitlements`
-   responses as new observation artifacts.
+1. **Run `broker send` against a live app instance** and capture actual reply
+   envelopes for:
+   - `requestClientId`
+   - `testConnection`
+   - `setSettings`
+   - `setAuthCodes`
+   - `requestGame`
+   - `startGame`
 
-2. **Add `/user` + `/user/entitlements` to `psn-direct-cli.ts`** once step 1
-   confirms the session pattern and the response shapes are known.
+2. **Capture the event that yields `streamServerClientId`**, which is the most
+   concrete remaining missing launch prerequisite.
 
-3. **Playwright intercept** — add a Playwright helper that launches the app
-   URL in a headed browser, intercepts the first `/kamaji/api/pcnow/` POST,
-   and saves the request body to an artifact.  This gives the session init
-   body schema without a full MITM setup.
+3. **Continue narrowing allocator/session-start behavior** by combining:
+   - broker replies
+   - segmented network captures
+   - current browser/HTTP-side Gaikai preflight evidence
 
-4. **Broker adapter** — with the app running and the broker reachable, add a
-   `broker send <command>` subcommand to `psn-direct-cli.ts` using the
-   `websocket` package already present in the asar `node_modules`.
-
-5. **Update `prototype:psplus -- status`** to call `queryKamajiGeo()` and
-   `probeKamajiSessionState()` directly instead of relying solely on the
-   static observation provider, so it reflects live state.
+4. **Keep `prototype:psplus -- status` and the direct CLI aligned** with the
+   live auth/session/Gaikai helpers as the remaining launch contract is mapped.

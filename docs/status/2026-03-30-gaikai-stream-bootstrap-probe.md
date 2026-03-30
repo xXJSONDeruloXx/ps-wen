@@ -346,16 +346,21 @@ That is a much narrower and better-defined problem than before.
 
 ## Best next step
 
-Highest-value next implementation work is now:
+**Update:** the generic `broker send <command> [payload]` surface is now
+implemented in `psn-direct-cli.ts`, and the direct CLI also now exposes the
+Gaikai preflight stack (`gaikai id|config|auth-code|event|log|preflight`).
 
-1. add `broker send <command> [payload]` to `psn-direct-cli.ts`
-2. observe/replay:
+So the next step is no longer implementation of the seam itself, but live use of
+that seam against the official app runtime:
+
+1. use `broker send` to observe/replay:
    - `requestClientId`
    - `setSettings`
    - `setAuthCodes`
    - `requestGame`
    - `startGame`
-3. capture the event payload that contains `streamServerClientId`
+2. capture the event payload that contains `streamServerClientId`
+3. correlate those replies with segmented network capture timing
 
 If that succeeds on a machine with the official app runtime available, the next
 remaining gap should be small enough to test a genuine launch attempt.
