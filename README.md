@@ -24,7 +24,7 @@ This repo is **not** for:
 
 ## Repo layout
 
-- `docs/` — organized research, architecture notes, experiment plans, status logs
+- `docs/` — organized research, architecture notes, experiment plans, status logs, and the living implementation roadmap (`docs/implementation/roadmap.md`)
 - `src/` — machine-readable observations and clean-room provider contracts
 - `scripts/public/` — public-source collection and normalization
 - `scripts/static/` — static inspection helpers for local official client artifacts

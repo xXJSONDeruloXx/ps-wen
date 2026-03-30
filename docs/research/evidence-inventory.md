@@ -17,6 +17,7 @@ This inventory converts the user-provided preliminary research into repo-local t
 | Public PS Plus PC Apollo summary | Public / generated | Extracts structured Kamaji config keys, PC user/account endpoint templates, and auth-flow hints from the live `apollo.js` asset | High |
 | Windows pktmon PC-app metadata capture summary | Local / generated | Summarizes sanctioned `pktmon` captures from startup and real stream-phase runs, including on-wire confirmation of `psnow.playstation.com`, `client.cc.prod.gaikai.com`, `config.cc.prod.gaikai.com`, `web.np.playstation.com`, `commerce.api.np.km.playstation.net`, and high-volume UDP/2053 transport candidates inside a Sony-owned `104.142.128.0/17` block | High |
 | PlayStation Plus observation-backed MVP prototype | Local / generated | Wraps current browser/native/capture findings into a safe CLI/provider for official login handoff, persisted browser-login flow state, bootstrap inspection, gated entitlement records, and placeholder allocation seams | High |
+| Segmented stream lifecycle captures | Local / generated | Shorter all-port launch, quit-game, and save-action captures narrow which hosts appear during bootstrap vs running-session vs save-management behavior | High |
 
 ## Evidence to collect next
 

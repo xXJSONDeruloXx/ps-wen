@@ -1,5 +1,9 @@
 # PlayStation Plus PC app metadata capture — 2026-03-29
 
+Follow-up segmented stream lifecycle notes now live in:
+
+- `docs/status/2026-03-30-pc-app-segmented-stream-captures.md`
+
 ## Commands used
 
 ```powershell

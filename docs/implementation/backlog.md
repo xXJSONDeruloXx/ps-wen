@@ -2,6 +2,8 @@
 
 Prioritized next steps based on current evidence.
 
+See also: `docs/implementation/roadmap.md` for the living done/in-progress/next tracker.
+
 ## Priority 1 — native PC app follow-up
 
 1. **Done**: install and summarize the real Windows payload with:
@@ -12,7 +14,7 @@ Prioritized next steps based on current evidence.
    - redacted `grc-response.html` handoff modes
    - roaming local/session-storage origin-key maps
 3. Keep `npm run research:pc-app-assets` and `npm run research:pc-app-apollo` current when the app URL/build changes so the repo tracks the live public JS bundle surface and structured endpoint/config hints.
-4. Run a short metadata-only capture while the logged-in PC app is idle, then again during any real cloud-stream launch path that is available.
+4. **Done in part**: run metadata captures while the logged-in PC app is idle, during real stream-phase activity, and in shorter segmented launch/quit/save-action windows.
 5. Compare capture hostnames against the newly observed native-client surfaces:
    - `psnow.playstation.com`
    - Sony account / risk hosts (`my.account.sony.com`, `ca.account.sony.com`, `h.online-metrix.net`, `skw.eve.account.sony.com`)
