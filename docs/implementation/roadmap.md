@@ -67,18 +67,20 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
   - `session-expired` confirmed; JSESSIONID is stale post-session
   - Re-establishment path identified: app launch → POST to `/kamaji/api/pcnow/00_09_000/user`
 - **Done**: Kamaji session establishment confirmed working standalone (2026-03-30)
-  - Endpoint: `POST /kamaji/api/pcnow/00_09_000/user/session`
-  - Body: form-encoded `country_code + language_code + date_of_birth`
-  - No Authorization header — auth rides Akamai bot-management cookies seeded by any Sony request
+  - guest session endpoint: `POST /kamaji/api/pcnow/00_09_000/user/session`
+  - guest body: form-encoded `country_code + language_code + date_of_birth`
+  - access-token session endpoint: same path, body `token=<urlencoded_access_token>`
+  - No Authorization header on the session POST — auth rides Akamai bot-management cookies seeded by any Sony request
   - Returns JSESSIONID + WEBDUID + sessionUrl in one shot
-  - Session starts as guest (`recognizedSession=false`); recognition step not yet traced
+  - access-token session yields non-null `accountId`, `onlineId`, `signInId` and unlocks `/user/profile` + `/user/entitlements`
+  - internal `recognizedSession` may remain false even though the session is practically authenticated
 - **Done**: `/user/stores` confirmed working with guest session
   - Returns full store/catalog/search/PS-Plus/recs URL map
 - **Done**: complete app `clientIDMap` extracted from live HTML meta tag
   - Two new client IDs found: `df10acc0` (browser/pachirisu/luxray), `1045850d` (zapdos/jolteon)
 - **Done**: GrandCentral SDK (`grandcentral.js`, 534KB) fetched and saved
   - Fully obfuscated — no plaintext paths survive; Playwright intercept was necessary
-- **Done**: `session`, `stores`, `manifest`, and `catalog` commands added to `psn-direct-cli.ts`
+- **Done**: `session`, `stores`, `profile`, `entitlements`, `manifest`, and `catalog` commands added to `psn-direct-cli.ts`
 - **Done**: app manifest endpoint confirmed live
   - `GET /exp-manifest/ms/pc/1.0/apollo/application/json/manifest`
   - returns app version map, env URLs, and PS Plus deep-link category IDs by region
@@ -129,7 +131,7 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
 
 ### Highest-value evidence collection
 
-0. **Session-active Kamaji queries** — launch the app, run `npm run api:psn-direct -- session-probe` until it reports `session-active`, then capture `/user` and `/user/entitlements` response shapes as new observation artifacts.  This is the single highest-value next step and requires no additional tooling.
+0. **Subscription + allocator path discovery** — authenticated token sessions now work standalone. The highest-value next step is to identify the real subscription endpoint (since `/user/subscription` returns 404) and then move on to stream/session allocation requests.
 
 1. **Cleaner click-from-list to picture-only** segmented capture
    - one such run already suggests allocation/startup had progressed into `client.cc` + Sony-owned UDP/2053 before the first visible frame
@@ -142,19 +144,21 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
 
 ### Highest-value implementation work
 
-1. **Session-gated Kamaji commands** — add `user`, `entitlements`, `subscription` subcommands to `psn-direct-cli.ts` once the session-active state is confirmed (needs fresh JSESSIONID from a live app run).
+1. **Subscription endpoint discovery** — authenticated session is live, but `/user/subscription` returns 404. Probe sibling paths and inspect app traffic for the real subscription resource.
 
-2. **Kamaji session POST body schema** — use a Playwright intercept to capture the exact POST body sent to `/kamaji/api/pcnow/00_09_000/user` during app startup.  This gives the session init schema without a MITM setup.
+2. **Allocator/session-start endpoint discovery** — with standalone auth now solved, focus on the request/response shape that turns entitlement + title selection into a real stream allocation.
 
 3. **Broker adapter seam** — with the app running and `broker` reporting reachable, add `broker send <command> [payload]` to `psn-direct-cli.ts` using the `websocket` package in the asar.  Known commands: `startGame`, `stop`, `requestGame`, `requestClientId`, `testConnection`, `setAuthCodes`, `setSettings`, `sendXmbCommand`, `routeInputToPlayer`, `routeInputToClient`, `saveDataDeepLink`, `rawDataDeepLink`, `invitationDeepLink`, `gameAlertDeepLink`, `systemStatusDeepLink`.
 
-4. **Live `prototype:psplus -- status` integration** — replace the static observation provider calls for login/entitlement state with live calls to `queryKamajiGeo()` and `probeKamajiSessionState()` from `psn-auth.ts`, so the prototype CLI reflects real-time state rather than cached artifacts.
+4. **Live `prototype:psplus -- status` integration** — replace the static observation provider calls for login/entitlement state with live calls from `psn-auth.ts`, so the prototype CLI reflects real-time state rather than cached artifacts.
 
-5. **Placeholder launch/quit UX** — use current placeholder allocation results + flow state machine
+5. **Entitlement normalization** — correlate `/user/entitlements` IDs and SKU IDs with store catalog product/container IDs.
 
-6. **Diagnostics panel / capture comparison view** — compare launch vs quit vs save-action captures side by side
+6. **Placeholder launch/quit UX** — use current placeholder allocation results + flow state machine
 
-7. **Session lifecycle model** — bootstrap -> running -> overlay -> save action -> quit -> post-session
+7. **Diagnostics panel / capture comparison view** — compare launch vs quit vs save-action captures side by side
+
+8. **Session lifecycle model** — bootstrap -> running -> overlay -> save action -> quit -> post-session
 
 ## Blocked / missing for a true Sony-app replacement
 
@@ -162,7 +166,7 @@ These are the pieces that still prevent a full standalone replacement of the off
 
 ### Auth/session ownership
 
-- ~~a standalone native auth completion model~~ **partially resolved**: NPSSO → bearer token exchange confirmed working standalone; full session ownership (JSESSIONID establishment) still requires app-launch POST body schema
+- ~~a standalone native auth completion model~~ **substantially resolved**: NPSSO → bearer token → JSESSIONID/WEBDUID → `/user/profile` + `/user/entitlements` confirmed working standalone. The remaining gap is internal session recognition semantics and any endpoints still hidden behind native WebView behavior.
 - confirmed post-browser callback/session ownership flow for a third-party app
 
 ### Entitlements

@@ -49,16 +49,19 @@ npm run api:psn-direct -- status                  # full snapshot: NPSSO, token,
 npm run api:psn-direct -- token                   # NPSSO → fresh bearer token (entitlements scope)
 npm run api:psn-direct -- token --client commerce # NPSSO → auth code (commerce/lists scope)
 npm run api:psn-direct -- geo                     # live Kamaji geo: region, timezone, postal range
-npm run api:psn-direct -- session                 # establish fresh JSESSIONID + WEBDUID from NPSSO
-npm run api:psn-direct -- session --dob 1990-06-15 # supply DOB if default doesn't match your account
-npm run api:psn-direct -- stores                  # live store/catalog/PS-Plus URL map (guest session)
+npm run api:psn-direct -- session                 # establish authenticated access-token session (default mode)
+npm run api:psn-direct -- session --mode guest    # force guest demographic session
+npm run api:psn-direct -- session --dob 1990-06-15 # supply DOB if using guest mode and default doesn't match your account
+npm run api:psn-direct -- profile                 # authenticated Kamaji profile (onlineId, display name, avatars)
+npm run api:psn-direct -- entitlements --limit 20 # authenticated entitlement inventory (597 confirmed live)
+npm run api:psn-direct -- stores                  # live store/catalog/PS-Plus URL map
 npm run api:psn-direct -- manifest                # live exp-manifest fetch (env URLs, deep-link category IDs)
 npm run api:psn-direct -- catalog --size 20       # browse a store container (default: APOLLOROOT)
 npm run api:psn-direct -- catalog --cat STORE-MSF192018-APOLLOMUSTPLAY --size 10
-  # examples now confirmed: Days Gone, God of War, Assassin's Creed Odyssey
+  # examples confirmed: Days Gone, God of War, Assassin's Creed Odyssey
 npm run api:psn-direct -- catalog --cat STORE-MSF192018-APOLLO_ACTION --size 10
-  # examples now confirmed: Guardians of the Galaxy, Far Cry 6, Deus Ex, Killing Floor 2
-npm run api:psn-direct -- session-probe           # Kamaji session health with actionable guidance
+  # examples confirmed: Guardians of the Galaxy, Far Cry 6, Deus Ex, Killing Floor 2
+npm run api:psn-direct -- session-probe           # verifies token session by hitting profile + entitlements
 npm run api:psn-direct -- broker                  # localhost:1235 broker reachability + command list
 npm run api:psn-direct -- <cmd> --json            # machine-readable output for any command
 

@@ -545,6 +545,25 @@ const AKAMAI_SEED_URL =
 const KAMAJI_SESSION_URL =
   'https://psnow.playstation.com/kamaji/api/pcnow/00_09_000/user/session';
 
+async function seedAkamaiCookies(npsso: string) {
+  const seedResp = await fetch(AKAMAI_SEED_URL, {
+    redirect: 'follow',
+    headers: {
+      Cookie: `npsso=${npsso}`,
+      'User-Agent': APP_UA,
+      Referer: 'https://psnow.playstation.com/',
+      Accept: 'text/html,application/xhtml+xml,*/*',
+    },
+  });
+
+  const seedCookies = (seedResp.headers as unknown as { getSetCookie?: () => string[] })
+    .getSetCookie?.() ?? [seedResp.headers.get('set-cookie') ?? ''].filter(Boolean);
+
+  const bmSz = seedCookies.find((c) => c.startsWith('bm_sz='))?.split(';')[0] ?? '';
+  const abck = seedCookies.find((c) => c.startsWith('_abck='))?.split(';')[0] ?? '';
+  return { bmSz, abck, seedStatus: seedResp.status };
+}
+
 // Persistent CDN routing cookie observed in the Qt WebEngine store
 const AKACD_COOKIE =
   'akacd_psnow-manifest=2177452799~rv=99~id=62761835be9be88fe3ee3bfadc057b1e';
@@ -570,22 +589,7 @@ export async function establishKamajiSession(
   languageCode = 'en'
 ): Promise<KamajiSessionResult> {
   // Step 1: seed Akamai bot-management cookies via any request to Sony auth
-  const seedResp = await fetch(AKAMAI_SEED_URL, {
-    redirect: 'follow',
-    headers: {
-      Cookie: `npsso=${npsso}`,
-      'User-Agent': APP_UA,
-      Referer: 'https://psnow.playstation.com/',
-      Accept: 'text/html,application/xhtml+xml,*/*',
-    },
-  });
-
-  const seedCookies = (seedResp.headers as unknown as { getSetCookie?: () => string[] })
-    .getSetCookie?.() ?? [seedResp.headers.get('set-cookie') ?? ''].filter(Boolean);
-
-  const bmSz = seedCookies.find((c) => c.startsWith('bm_sz='))?.split(';')[0] ?? '';
-  const abck = seedCookies.find((c) => c.startsWith('_abck='))?.split(';')[0] ?? '';
-
+  const { bmSz, abck } = await seedAkamaiCookies(npsso);
   const cookieStr = [bmSz, abck, AKACD_COOKIE].filter(Boolean).join('; ');
 
   // Step 2: POST to /user/session with demographics
@@ -742,6 +746,172 @@ export async function queryKamajiUserStores(
     recUrl: d.rec_url ?? '',
     psPlusWelcomeMatUrl: d.psPlusWelcomeMatUrl ?? '',
     psPlusDealsUrl: d.psPlusDealsUrl ?? '',
+    queriedAt: new Date().toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Access-token session establishment (authenticated session path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Directly replicates GrandCentral.UserSessionService.createAccessTokenSession():
+ *
+ *   POST /kamaji/api/pcnow/00_09_000/user/session
+ *   Content-Type: application/x-www-form-urlencoded
+ *   body: token=<urlencoded_access_token>
+ *
+ * This returns a session with non-null accountId/onlineId/signInId and unlocks
+ * `/user/profile` and `/user/entitlements` immediately.
+ */
+export async function establishKamajiAccessTokenSession(
+  npsso: string,
+  accessToken: string
+): Promise<KamajiSessionResult> {
+  const { bmSz, abck } = await seedAkamaiCookies(npsso);
+  const cookieStr = [bmSz, abck, AKACD_COOKIE].filter(Boolean).join('; ');
+  const body = `token=${encodeURIComponent(accessToken)}`;
+
+  const response = await fetch(KAMAJI_SESSION_URL, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': APP_UA,
+      Origin: 'https://psnow.playstation.com',
+      Referer: 'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/',
+      Cookie: cookieStr,
+    },
+    body,
+  });
+
+  const sessionCookies = (
+    response.headers as unknown as { getSetCookie?: () => string[] }
+  ).getSetCookie?.() ?? [response.headers.get('set-cookie') ?? ''].filter(Boolean);
+
+  const jsessionId =
+    sessionCookies.find((c) => c.startsWith('JSESSIONID='))?.split(';')[0].split('=')[1] ?? '';
+  const webduid =
+    sessionCookies.find((c) => c.startsWith('WEBDUID='))?.split(';')[0].split('=')[1] ?? '';
+
+  const json = (await response.json()) as {
+    header?: { status_code?: string; message_key?: string };
+    data?: {
+      sessionUrl?: string;
+      country?: string;
+      language?: string;
+      age?: number;
+      account_type?: number;
+      recognizedSession?: boolean;
+      accountId?: string | null;
+      onlineId?: string | null;
+      signInId?: string | null;
+      currencies?: Array<{ code?: string; symbol?: string }>;
+    };
+  };
+
+  if (json.header?.status_code !== '0x0000') {
+    throw new Error(
+      `Kamaji access-token session error: ${json.header?.message_key ?? 'unknown'} (${json.header?.status_code ?? '?'})`
+    );
+  }
+
+  const data = json.data ?? {};
+  return {
+    jsessionId,
+    webduid,
+    sessionUrl: data.sessionUrl ?? 'https://psnow.playstation.com/kamaji/api/pcnow/00_09_000/',
+    country: data.country ?? 'US',
+    language: data.language ?? 'en',
+    age: data.age ?? 0,
+    accountType: data.account_type ?? 0,
+    recognizedSession: data.recognizedSession ?? false,
+    accountId: data.accountId ?? null,
+    onlineId: data.onlineId ?? null,
+    currencies: (data.currencies ?? []).map((c) => ({ code: c.code ?? '', symbol: c.symbol ?? '' })),
+    establishedAt: new Date().toISOString(),
+  };
+}
+
+export type KamajiProfileResult = {
+  onlineId: string;
+  onlineName: string;
+  aboutMe: string;
+  avatarUrl: string;
+  mediumAvatarUrl: string;
+  smallAvatarUrl: string;
+  queriedAt: string;
+};
+
+export async function queryKamajiUserProfile(
+  accessToken: string,
+  jsessionId: string,
+  webduid: string
+): Promise<KamajiProfileResult> {
+  const response = await fetch('https://psnow.playstation.com/kamaji/api/pcnow/00_09_000/user/profile', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+      'User-Agent': APP_UA,
+      Cookie: `JSESSIONID=${jsessionId}; WEBDUID=${webduid}`,
+    },
+  });
+  const json = await response.json() as { header?: { status_code?: string; message_key?: string }; data?: Record<string, unknown> };
+  if (json.header?.status_code !== '0x0000') {
+    throw new Error(`Kamaji user/profile error: ${json.header?.message_key ?? 'unknown'} (${json.header?.status_code ?? '?'})`);
+  }
+  const d = json.data ?? {};
+  return {
+    onlineId: String(d.onlineid ?? ''),
+    onlineName: String(d.onlinename ?? ''),
+    aboutMe: String(d.aboutme ?? ''),
+    avatarUrl: String(d.avatarurl ?? ''),
+    mediumAvatarUrl: String(d.medium_avatarurl ?? ''),
+    smallAvatarUrl: String(d.small_avatarurl ?? ''),
+    queriedAt: new Date().toISOString(),
+  };
+}
+
+export type KamajiEntitlementsResult = {
+  totalResults: number;
+  revisionId: number;
+  entitlements: Array<{
+    id: string;
+    skuId: string;
+    activeDate: string;
+    inactiveDate: string;
+  }>;
+  queriedAt: string;
+};
+
+export async function queryKamajiUserEntitlements(
+  accessToken: string,
+  jsessionId: string,
+  webduid: string
+): Promise<KamajiEntitlementsResult> {
+  const response = await fetch('https://psnow.playstation.com/kamaji/api/psnow/00_09_000/user/entitlements', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+      'User-Agent': APP_UA,
+      Cookie: `JSESSIONID=${jsessionId}; WEBDUID=${webduid}`,
+    },
+  });
+  const json = await response.json() as { header?: { status_code?: string; message_key?: string }; data?: Record<string, unknown> };
+  if (json.header?.status_code !== '0x0000') {
+    throw new Error(`Kamaji user/entitlements error: ${json.header?.message_key ?? 'unknown'} (${json.header?.status_code ?? '?'})`);
+  }
+  const data = (json.data ?? {}) as Record<string, unknown>;
+  const ents = Array.isArray(data.entitlements) ? data.entitlements as Array<Record<string, unknown>> : [];
+  return {
+    totalResults: Number(data.totalResults ?? 0),
+    revisionId: Number(data.revisionId ?? 0),
+    entitlements: ents.map((e) => ({
+      id: String(e.id ?? ''),
+      skuId: String(e.sku_id ?? ''),
+      activeDate: String(e.active_date ?? ''),
+      inactiveDate: String(e.inactive_date ?? ''),
+    })),
     queriedAt: new Date().toISOString(),
   };
 }

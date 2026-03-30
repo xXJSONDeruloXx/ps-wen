@@ -29,7 +29,10 @@ import {
   probeKamajiSessionState,
   probeBrokerReachability,
   establishKamajiSession,
+  establishKamajiAccessTokenSession,
   queryKamajiUserStores,
+  queryKamajiUserProfile,
+  queryKamajiUserEntitlements,
   PSN_OAUTH_CLIENTS,
   type PsnOAuthClientId,
 } from '../lib/psn-auth.js';
@@ -49,8 +52,10 @@ function usage(): never {
       'Usage:',
       '  npm run api:psn-direct -- token [--client entitlements|commerce|firstplay|commerce-basic|sso] [--out <path>] [--json]',
       '  npm run api:psn-direct -- geo [--json]',
-      '  npm run api:psn-direct -- session [--dob YYYY-MM-DD] [--country US] [--lang en] [--json]',
-      '  npm run api:psn-direct -- stores [--dob YYYY-MM-DD] [--json]',
+      '  npm run api:psn-direct -- session [--mode token|guest] [--dob YYYY-MM-DD] [--country US] [--lang en] [--json]',
+      '  npm run api:psn-direct -- stores [--mode token|guest] [--dob YYYY-MM-DD] [--json]',
+      '  npm run api:psn-direct -- profile [--json]',
+      '  npm run api:psn-direct -- entitlements [--limit 20] [--json]',
       '  npm run api:psn-direct -- manifest [--json]',
       '  npm run api:psn-direct -- catalog [--cat STORE-MSF192018-APOLLOROOT] [--size 20] [--dob YYYY-MM-DD] [--json]',
       '  npm run api:psn-direct -- session-probe [--json]',
@@ -208,14 +213,19 @@ async function cmdSession(parsed: ParsedArgs) {
     throw new Error('No NPSSO found. Ensure the PlayStation Plus app has been logged in.');
   }
 
+  const mode    = typeof parsed.flags.mode === 'string' ? parsed.flags.mode : 'token';
   const dob     = typeof parsed.flags.dob     === 'string' ? parsed.flags.dob     : '1981-01-01';
   const country = typeof parsed.flags.country === 'string' ? parsed.flags.country : 'US';
   const lang    = typeof parsed.flags.lang    === 'string' ? parsed.flags.lang    : 'en';
 
-  const session = await establishKamajiSession(cookies.roaming.npsso, dob, country, lang);
+  const tokenResult = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
+  const session = mode === 'guest'
+    ? await establishKamajiSession(cookies.roaming.npsso, dob, country, lang)
+    : await establishKamajiAccessTokenSession(cookies.roaming.npsso, tokenResult.accessToken);
 
   const result = {
     generatedAt: session.establishedAt,
+    mode,
     jsessionId: session.jsessionId,
     webduid: session.webduid,
     sessionUrl: session.sessionUrl,
@@ -227,13 +237,16 @@ async function cmdSession(parsed: ParsedArgs) {
     accountId: session.accountId,
     onlineId: session.onlineId,
     currencies: session.currencies,
-    notes: session.recognizedSession
-      ? ['Session is recognized. All Kamaji endpoints should be accessible.']
+    notes: mode === 'token'
+      ? [
+          'Access-token session established via GrandCentral createAccessTokenSession() equivalent.',
+          '/user/profile and /user/entitlements are now accessible.',
+          '`recognizedSession` may remain false even though accountId/onlineId are populated.',
+        ]
       : [
-          'Session is a guest (recognizedSession=false). /user/stores and /geo are accessible.',
-          '/user, /user/entitlements, /user/subscription require a recognized session.',
-          'Recognition requires the GrandCentral SDK to link the OAuth code to the session.',
-          'Launch the PS Plus app to get a fully recognized JSESSIONID, then re-run session-probe.',
+          'Guest session established via demographic POST to /user/session.',
+          '/user/stores and /geo are accessible.',
+          '/user/profile and /user/entitlements require token mode.',
         ],
   };
 
@@ -246,6 +259,7 @@ async function cmdSession(parsed: ParsedArgs) {
   if (asJson(parsed)) { console.log(JSON.stringify(result, null, 2)); return; }
 
   console.log(`[psn-direct] Wrote: ${outputPath}`);
+  console.log(`Mode              : ${mode}`);
   console.log(`JSESSIONID        : ${session.jsessionId.slice(0, 16)}...`);
   console.log(`WEBDUID           : ${session.webduid.slice(0, 20)}...`);
   console.log(`Session URL       : ${session.sessionUrl}`);
@@ -253,6 +267,7 @@ async function cmdSession(parsed: ParsedArgs) {
   console.log(`Age               : ${session.age}`);
   console.log(`Recognized        : ${session.recognizedSession}`);
   console.log(`Account ID        : ${session.accountId ?? '(null — guest session)'}`);
+  console.log(`Online ID         : ${session.onlineId ?? '(null)'}`);
   for (const note of result.notes) console.log(`Note              : ${note}`);
 }
 
@@ -265,15 +280,15 @@ async function cmdStores(parsed: ParsedArgs) {
     throw new Error('No NPSSO found.');
   }
 
+  const mode    = typeof parsed.flags.mode === 'string' ? parsed.flags.mode : 'token';
   const dob     = typeof parsed.flags.dob     === 'string' ? parsed.flags.dob     : '1981-01-01';
   const country = typeof parsed.flags.country === 'string' ? parsed.flags.country : 'US';
   const lang    = typeof parsed.flags.lang    === 'string' ? parsed.flags.lang    : 'en';
 
-  // Get token and session in parallel
-  const [tokenResult, session] = await Promise.all([
-    exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements'),
-    establishKamajiSession(cookies.roaming.npsso, dob, country, lang),
-  ]);
+  const tokenResult = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
+  const session = mode === 'guest'
+    ? await establishKamajiSession(cookies.roaming.npsso, dob, country, lang)
+    : await establishKamajiAccessTokenSession(cookies.roaming.npsso, tokenResult.accessToken);
 
   const stores = await queryKamajiUserStores(
     tokenResult.accessToken,
@@ -294,6 +309,40 @@ async function cmdStores(parsed: ParsedArgs) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// profile  — fetch recognized account profile via access-token session
+// ---------------------------------------------------------------------------
+async function cmdProfile(parsed: ParsedArgs) {
+  const cookies = await readLocalPsnCookies();
+  if (!cookies.roaming.npsso) throw new Error('No NPSSO found.');
+  const token = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
+  const session = await establishKamajiAccessTokenSession(cookies.roaming.npsso, token.accessToken);
+  const profile = await queryKamajiUserProfile(token.accessToken, session.jsessionId, session.webduid);
+  if (asJson(parsed)) { console.log(JSON.stringify(profile, null, 2)); return; }
+  console.log(`Online ID         : ${profile.onlineId}`);
+  console.log(`Display Name      : ${profile.onlineName}`);
+  console.log(`Avatar            : ${profile.avatarUrl}`);
+  console.log(`Queried at        : ${profile.queriedAt}`);
+}
+
+// ---------------------------------------------------------------------------
+// entitlements  — fetch live entitlement inventory via access-token session
+// ---------------------------------------------------------------------------
+async function cmdEntitlements(parsed: ParsedArgs) {
+  const cookies = await readLocalPsnCookies();
+  if (!cookies.roaming.npsso) throw new Error('No NPSSO found.');
+  const limit = typeof parsed.flags.limit === 'string' ? parseInt(parsed.flags.limit, 10) : 20;
+  const token = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
+  const session = await establishKamajiAccessTokenSession(cookies.roaming.npsso, token.accessToken);
+  const data = await queryKamajiUserEntitlements(token.accessToken, session.jsessionId, session.webduid);
+  if (asJson(parsed)) { console.log(JSON.stringify(data, null, 2)); return; }
+  console.log(`Total entitlements: ${data.totalResults}`);
+  console.log(`Revision ID       : ${data.revisionId}`);
+  for (const ent of data.entitlements.slice(0, limit)) {
+    console.log(` - ${ent.id}  ::  ${ent.skuId}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // manifest  — fetch the live app manifest (no auth required)
 // ---------------------------------------------------------------------------
@@ -373,21 +422,43 @@ async function cmdSessionProbe(parsed: ParsedArgs) {
   }
 
   const exchange = await exchangeNpssoForToken(cookies.roaming.npsso, 'entitlements');
-  const probe = await probeKamajiSessionState(
-    exchange.accessToken,
-    cookies.qtWebEngine.jsessionId,
-    cookies.qtWebEngine.webduid
-  );
+  const session = await establishKamajiAccessTokenSession(cookies.roaming.npsso, exchange.accessToken);
+
+  let profileOk = false;
+  let entitlementsOk = false;
+  let profileError: string | null = null;
+  let entitlementsError: string | null = null;
+  let entitlementCount: number | null = null;
+
+  try {
+    await queryKamajiUserProfile(exchange.accessToken, session.jsessionId, session.webduid);
+    profileOk = true;
+  } catch (e) {
+    profileError = e instanceof Error ? e.message : String(e);
+  }
+
+  try {
+    const ents = await queryKamajiUserEntitlements(exchange.accessToken, session.jsessionId, session.webduid);
+    entitlementsOk = true;
+    entitlementCount = ents.totalResults;
+  } catch (e) {
+    entitlementsError = e instanceof Error ? e.message : String(e);
+  }
 
   const result = {
     generatedAt: new Date().toISOString(),
-    sessionStatus: probe.status,
-    httpStatus: probe.httpStatus,
-    rawStatusCode: probe.rawCode,
-    hasJsessionId: Boolean(cookies.qtWebEngine.jsessionId),
-    hasWebduid: Boolean(cookies.qtWebEngine.webduid),
-    freshTokenObtained: true,
-    notes: sessionStatusNotes(probe.status),
+    sessionStatus: profileOk || entitlementsOk ? 'session-active' : 'session-partial',
+    jsessionIdPresent: Boolean(session.jsessionId),
+    webduidPresent: Boolean(session.webduid),
+    recognizedSession: session.recognizedSession,
+    accountIdPresent: Boolean(session.accountId),
+    onlineIdPresent: Boolean(session.onlineId),
+    profileOk,
+    entitlementsOk,
+    entitlementCount,
+    profileError,
+    entitlementsError,
+    notes: sessionStatusNotes(profileOk || entitlementsOk ? 'session-active' : 'session-partial'),
   };
 
   if (asJson(parsed)) {
@@ -396,11 +467,13 @@ async function cmdSessionProbe(parsed: ParsedArgs) {
   }
 
   console.log(`Session status    : ${result.sessionStatus}`);
-  console.log(`HTTP status       : ${result.httpStatus}`);
-  console.log(`Raw Kamaji code   : ${result.rawStatusCode}`);
-  console.log(`Has JSESSIONID    : ${result.hasJsessionId}`);
-  console.log(`Has WEBDUID       : ${result.hasWebduid}`);
-  console.log(`Fresh token ready : ${result.freshTokenObtained}`);
+  console.log(`Has JSESSIONID    : ${result.jsessionIdPresent}`);
+  console.log(`Has WEBDUID       : ${result.webduidPresent}`);
+  console.log(`recognizedSession : ${result.recognizedSession}`);
+  console.log(`Account ID        : ${result.accountIdPresent}`);
+  console.log(`Online ID         : ${result.onlineIdPresent}`);
+  console.log(`Profile endpoint  : ${result.profileOk}${result.profileError ? ` (${result.profileError})` : ''}`);
+  console.log(`Entitlements      : ${result.entitlementsOk}${result.entitlementCount !== null ? ` (${result.entitlementCount})` : ''}${result.entitlementsError ? ` (${result.entitlementsError})` : ''}`);
   for (const note of result.notes) {
     console.log(`Note              : ${note}`);
   }
@@ -409,22 +482,18 @@ async function cmdSessionProbe(parsed: ParsedArgs) {
 function sessionStatusNotes(status: string): string[] {
   switch (status) {
     case 'session-active':
-      return ['Kamaji session is live. Bearer token + JSESSIONID accepted.'];
-    case 'session-expired':
       return [
-        'JSESSIONID is stale. A new Kamaji session must be established.',
-        'The PlayStation Plus PC app does this automatically on launch via a POST to /kamaji/api/pcnow/00_09_000/user with the auth code.',
-        'To re-establish: launch the PS Plus app; it will create a new JSESSIONID/WEBDUID pair.',
+        'Access-token session is live.',
+        '/user/profile and /user/entitlements are accessible with the returned JSESSIONID + WEBDUID.',
+        '`recognizedSession` may still be false even though account identity is populated.',
       ];
-    case 'no-session':
+    case 'session-partial':
       return [
-        'No JSESSIONID present. Session has not been established for this machine.',
-        'The Kamaji session is initiated by the native PlayStation Plus client on startup.',
+        'A session was created, but one or more authenticated endpoints still failed.',
+        'Retry after a short delay or launch the native app to let GrandCentral complete additional background setup.',
       ];
-    case 'auth-required':
-      return ['Bearer token was rejected. NPSSO may be expired. Try re-logging in to the PS Plus app.'];
     default:
-      return ['Unexpected session state. Check raw status code for details.'];
+      return ['Unexpected session state.'];
   }
 }
 
@@ -581,6 +650,8 @@ async function main() {
   if (parsed.command === 'geo') return cmdGeo(parsed);
   if (parsed.command === 'session') return cmdSession(parsed);
   if (parsed.command === 'stores') return cmdStores(parsed);
+  if (parsed.command === 'profile') return cmdProfile(parsed);
+  if (parsed.command === 'entitlements') return cmdEntitlements(parsed);
   if (parsed.command === 'manifest') return cmdManifest(parsed);
   if (parsed.command === 'catalog') return cmdCatalog(parsed);
   if (parsed.command === 'session-probe') return cmdSessionProbe(parsed);
