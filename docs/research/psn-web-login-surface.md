@@ -33,9 +33,21 @@ Observed redirect chain structure:
 
 The following fields appeared in the example but should be treated as **ephemeral per run** and not hardcoded in docs or tests:
 
-- `duid`
+- `duid` — device identifier, generated locally; NOT derived from username or account ID
 - `state`
 - `cid`
+
+### duid format
+
+All PSN-adjacent flows use a hex `duid` with a fixed context-encoding prefix followed
+by random or device-derived bytes.  Four confirmed families:
+
+| Prefix             | Context                   | Tail                  | Total hex len |
+|--------------------|---------------------------|-----------------------|---------------|
+| `0000000700400088` | PSNow PC-app WEBDUID      | MAC-derived ASCII-hex | 50            |
+| `0000000700090100` | Web login URL             | 32 random bytes       | 66            |
+| `0000000700410080` | Chiaki Remote Play client | 16 random bytes       | 48            |
+| `0000000700060100` | Kamaji guest/token session WEBDUID | 40 random bytes | 80   |
 
 ## Why this matters
 

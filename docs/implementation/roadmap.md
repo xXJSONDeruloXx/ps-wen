@@ -99,6 +99,16 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
   - `broker` — localhost:1235 WebSocket reachability probe
   - `status` — combined snapshot of all of the above
 - **Done**: all traps and corrections documented in `docs/status/2026-03-30-psn-auth-token-surface.md`
+- **Done**: full autonomous auth resolution (2026-03-30)
+  - NPSSO: Safari `prompt=none` silent auth + `document.cookie` AppleScript — no Playwright, no manual login needed
+  - Kamaji session: `token=<urlencoded_bearer>` body POST yields accountId + onlineId + JSESSIONID + WEBDUID
+  - `/user/profile` + `/user/entitlements` (597 titles) confirmed live
+  - Chiaki Remote Play tokens obtained via same Safari path: access_token + refresh_token + user_id confirmed
+  - `cloudAssistedNavigation/v2/users/me/clients` working with Chiaki token (no PS5 registered)
+  - Four DUID prefix families documented: `0000000700400088` (PC-app), `0000000700090100` (web), `0000000700410080` (Chiaki), `0000000700060100` (guest session)
+  - `recognizedSession: false` confirmed permanent outside native Electron WebView (cross-domain `ca.account.sony.com/ELdff8h5I1y7/...` load blocked by Akamai; does not affect profile/entitlements)
+  - Sony login form stable selectors documented: `#signin-entrance-input-signinId`, `#signin-password-input-password`
+  - Akamai bot-management (not passkey) is the auth blocker for automated `ssocookie` — passkey is `enabled:false` on this account
 
 ## In progress
 
@@ -166,8 +176,12 @@ These are the pieces that still prevent a full standalone replacement of the off
 
 ### Auth/session ownership
 
-- ~~a standalone native auth completion model~~ **substantially resolved**: NPSSO → bearer token → JSESSIONID/WEBDUID → `/user/profile` + `/user/entitlements` confirmed working standalone. The remaining gap is internal session recognition semantics and any endpoints still hidden behind native WebView behavior.
-- confirmed post-browser callback/session ownership flow for a third-party app
+- ~~a standalone native auth completion model~~ **fully resolved (2026-03-30)**:
+  - NPSSO obtained via Safari `prompt=none` silent auth + `document.cookie` via AppleScript
+  - NPSSO → bearer token → `token=<bearer>` body POST to `/user/session` → JSESSIONID + WEBDUID + accountId + onlineId confirmed
+  - `/user/profile` + `/user/entitlements` (597 titles) confirmed working standalone
+  - Chiaki Remote Play tokens (access_token + refresh_token + user_id) obtained via same Safari silent-auth path
+  - `recognizedSession: false` is permanent outside native Electron WebView — does NOT block profile/entitlements
 
 ### Entitlements
 

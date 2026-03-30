@@ -3,17 +3,34 @@
 ## Conclusion
 
 NPSSO is **not generated locally** by the client. It is issued by Sony after a
-real account login. That means the viable app-free path is:
+real account login. Two confirmed autonomous paths:
 
-1. open an official Sony/PlayStation web login surface
-2. complete real user sign-in (and MFA if required)
-3. capture the resulting browser cookie jar
-4. extract the `npsso` cookie from that browser state
+### Path A — Safari silent auth (preferred, fully autonomous)
 
-So the solution is **retrieval from an official browser login session**, not
-local generation.
+If the user's Safari browser already has a valid `ca.account.sony.com` session
+from prior PlayStation use:
 
-## What was added
+1. Open the PSNow OAuth URL with `prompt=none` in Safari:
+   ```
+   https://ca.account.sony.com/api/authz/v3/oauth/authorize?...client_id=dc523cc2...prompt=none
+   ```
+2. Safari redirects directly to `grc-response.html#access_token=...` — no login required
+3. Navigate Safari to `ca.account.sony.com` and read NPSSO via AppleScript:
+   ```applescript
+   tell application "Safari"
+     return do JavaScript "document.cookie" in front document
+   end tell
+   ```
+   Parse out `npsso=...` from the cookie string.
+
+This requires no manual sign-in and no Playwright.  NPSSO is NOT httpOnly in this
+context and can be read directly.  Confirmed working on 2026-03-30.
+
+### Path B — Headed Playwright login (manual, fallback)
+
+If Safari does not have an existing session:
+
+## What was added (headed helper path)
 
 ### `scripts/auth/manual-psn-login.ts`
 

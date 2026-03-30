@@ -17,6 +17,19 @@ async function ensureParent(filePath: string) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
 }
 
+async function firstVisibleLocator(locators: ReturnType<Page['locator']>[]) {
+  for (const locator of locators) {
+    try {
+      await locator.waitFor({ state: 'visible', timeout: 2_000 });
+      return locator;
+    } catch {
+      // ignore and try next locator
+    }
+  }
+
+  return null;
+}
+
 async function prefillEmail(page: Page, email: string | undefined) {
   if (!email) return;
   const selectors = [
@@ -32,11 +45,19 @@ async function prefillEmail(page: Page, email: string | undefined) {
       await locator.waitFor({ state: 'visible', timeout: 2_000 });
       await locator.click();
       await locator.fill(email);
-      break;
+      return;
     } catch {
       // ignore and try next selector
     }
   }
+
+  const fallback = await firstVisibleLocator([
+    page.getByRole('textbox', { name: /sign-?in id|email address/i }).first(),
+    page.getByLabel(/sign-?in id|email address/i).first()
+  ]);
+  if (!fallback) return;
+  await fallback.click();
+  await fallback.fill(email);
 }
 
 async function gatherOriginStorage(context: BrowserContext) {
