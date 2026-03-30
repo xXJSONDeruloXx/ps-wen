@@ -30,6 +30,7 @@ type HarnessReport = {
   reportPath: string;
   brokerLogPath: string | null;
   brokerStatePath: string | null;
+  settleMs: number;
   consoleMessages: Array<{ type: string; text: string }>;
   pageErrors: string[];
   requestFailures: Array<{ url: string; errorText: string }>;
@@ -46,6 +47,22 @@ type HarnessReport = {
     appGlobals: string[];
     pageUrl: string;
     title: string;
+  };
+  finalState: {
+    pageUrl: string;
+    title: string;
+    bodyTextSample: string;
+    buttonTexts: string[];
+    headings: string[];
+    mediaElements: Array<{
+      tag: string;
+      id: string | null;
+      className: string;
+      width: number;
+      height: number;
+      visible: boolean;
+      src: string | null;
+    }>;
   };
   scenarios: unknown[];
   bridgeLog: unknown[];
@@ -694,6 +711,7 @@ async function main() {
   );
   const storageStatePath = resolveArtifactPath(env.PSN_STORAGE_STATE, DEFAULT_STORAGE_STATE);
   const headless = toBoolean(typeof parsed.flags.headless === 'string' ? parsed.flags.headless : env.HEADLESS, true);
+  const settleMs = asNumber(parsed.flags['settle-ms'], 0);
   await fsp.mkdir(path.dirname(reportPath), { recursive: true });
   await fsp.mkdir(path.dirname(screenshotPath), { recursive: true });
 
@@ -767,11 +785,51 @@ async function main() {
       { seed: launchSeed, script: PAGE_SCENARIO_SCRIPT }
     )) as unknown[];
 
+    if (settleMs > 0) {
+      await page.waitForTimeout(settleMs);
+    }
+
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
 
     const bridgeLog = await page.evaluate(() => {
       const win = window as unknown as { __PSWEN_BRIDGE_LOG?: unknown[] };
       return win.__PSWEN_BRIDGE_LOG ?? [];
+    });
+
+    const finalState = await page.evaluate(() => {
+      const bodyText = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
+      const buttonTexts = Array.from(document.querySelectorAll('button'))
+        .map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .slice(0, 20);
+      const headings = Array.from(document.querySelectorAll('h1,h2,h3,[role="heading"]'))
+        .map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .slice(0, 20);
+      const mediaElements = Array.from(document.querySelectorAll('video,canvas,object,embed,iframe'))
+        .map((el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          const srcCandidate = (el as HTMLIFrameElement).src || (el as HTMLVideoElement).currentSrc || el.getAttribute('src');
+          return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || null,
+            className: (el.className || '').toString(),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+            visible: style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') !== 0 && rect.width > 0 && rect.height > 0,
+            src: srcCandidate || null,
+          };
+        })
+        .slice(0, 50);
+      return {
+        pageUrl: location.href,
+        title: document.title,
+        bodyTextSample: bodyText.slice(0, 2000),
+        buttonTexts,
+        headings,
+        mediaElements,
+      };
     });
 
     const report: HarnessReport = {
@@ -785,11 +843,13 @@ async function main() {
       reportPath,
       brokerLogPath: broker.brokerLogPath,
       brokerStatePath: broker.brokerStatePath,
+      settleMs,
       consoleMessages,
       pageErrors,
       requestFailures,
       websockets: [...websockets.values()],
       initState,
+      finalState,
       scenarios,
       bridgeLog,
     };

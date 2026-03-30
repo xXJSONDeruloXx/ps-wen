@@ -314,6 +314,8 @@ The missing Windows-native pieces remain:
 Additional evidence pointing at a native-only media boundary:
 
 - the saved screenshot remains the Plus splash/UI rather than a rendered game frame
+- after a post-launch settle wait, the page still exposes **no browser-visible**
+  media surfaces (`<video>`, `<canvas>`, `<object>`, `<embed>`, `<iframe>`)
 - app-level `gkPlayer` handling on PC reacts to `VideoStart` primarily by flipping
   `isStreaming` state rather than revealing a browser `<video>`/`<canvas>` stream surface
 - `PCClientAPI.showPlayer()` is implemented as:
