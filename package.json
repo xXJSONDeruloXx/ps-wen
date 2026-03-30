@@ -32,6 +32,7 @@
     "api:playstation-web-summary": "tsx scripts/api/summarize-playstation-web-probe.ts",
     "api:psn-direct": "tsx scripts/api/psn-direct-cli.ts",
     "broker:emulator": "tsx scripts/broker/mock-broker.ts",
+    "broker:shell-harness": "tsx scripts/broker/probe-shell-harness.ts",
     "inspect:bundle": "tsx scripts/static/inventory-client-bundle.ts",
     "inspect:installer": "tsx scripts/static/inspect-windows-installer.ts",
     "inspect:pc-app": "tsx scripts/static/summarize-playstation-plus-pc.ts",

@@ -318,7 +318,11 @@ async function main() {
         return;
       }
       case 'requestClientId': {
-        sendEvent(connection, 'GOT_CLIENT_ID', { ...state.mockClientIds });
+        sendEvent(connection, 'GOT_CLIENT_ID', {
+          ...state.mockClientIds,
+          clientId: state.mockClientIds.gkClientId,
+          ps3GkClientId: state.mockClientIds.ps3GKClientID,
+        });
         sendEvent(connection, 'PROCESS_END', { command, ok: true, mocked: true }, 1);
         return;
       }
