@@ -44,33 +44,66 @@ To use PSN credentials, place them in `.env` using `.env.example` as the templat
 ## Key commands
 
 ```bash
+# ── Direct PSN API (no app running required) ──────────────────────────────────
+npm run api:psn-direct -- status                  # full snapshot: NPSSO, token, geo, session, broker
+npm run api:psn-direct -- token                   # NPSSO → fresh bearer token (entitlements scope)
+npm run api:psn-direct -- token --client commerce # NPSSO → auth code (commerce/lists scope)
+npm run api:psn-direct -- geo                     # live Kamaji geo: region, timezone, postal range
+npm run api:psn-direct -- session                 # establish fresh JSESSIONID + WEBDUID from NPSSO
+npm run api:psn-direct -- session --dob 1990-06-15 # supply DOB if default doesn't match your account
+npm run api:psn-direct -- stores                  # live store/catalog/PS-Plus URL map (guest session)
+npm run api:psn-direct -- session-probe           # Kamaji session health with actionable guidance
+npm run api:psn-direct -- broker                  # localhost:1235 broker reachability + command list
+npm run api:psn-direct -- <cmd> --json            # machine-readable output for any command
+
+# ── Session intercept (Playwright) ─────────────────────────────────────────────
+npm run auth:intercept-session    # inject NPSSO into browser, intercept all GrandCentral SDK calls
+
+# ── Prototype CLI ─────────────────────────────────────────────────────────────
+npm run prototype:psplus -- status       # observation-backed flow state + capability map
+npm run prototype:psplus -- login        # open official PSN sign-in URL in system browser
+npm run prototype:psplus -- confirm-login --note "ready"
+npm run prototype:psplus -- reset-flow
+npm run prototype:psplus -- bootstrap
+npm run prototype:psplus -- entitlements
+npm run prototype:psplus -- allocate --title-id CUSA00001
+
+# ── Research / public source ──────────────────────────────────────────────────
 npm run research:public        # fetch public capability pages and normalize findings
-npm run research:web-assets    # inspect first-party web JS/JSON assets referenced by Safari session summary
-npm run research:graphql-docs  # extract embedded GraphQL docs from public first-party bundles and correlate them with probe outcomes
-npm run research:pc-app-assets # fetch and summarize public JS assets referenced by the installed PS Plus PC app profile
-npm run research:pc-app-apollo # extract structured Kamaji/account/API config hints from the live public apollo.js asset
+npm run research:web-assets    # inspect first-party web JS/JSON assets
+npm run research:graphql-docs  # extract embedded GraphQL docs from public bundles
+npm run research:pc-app-assets # fetch and summarize public JS assets from the PS Plus app profile
+npm run research:pc-app-apollo # extract Kamaji/account/API config hints from live apollo.js
 npm run research:control-plane # synthesize a browser control-plane snapshot from local artifacts
-npm run test:unit              # unit tests for auth/endpoint normalization logic
-npm run test:public            # verify collected public evidence has expected capability signals
-npm run env:check              # show readiness for login, bundle, and capture workflows
-npm run test:psn-login         # official login smoke harness using Playwright
+
+# ── Auth / session capture ────────────────────────────────────────────────────
 npm run auth:psn-headed        # headed/manual login helper that dumps cookies + storage locally
 npm run auth:psn-summary       # create a redacted auth artifact summary from local captures
-npm run auth:safari-summary    # summarize Safari PlayStation tabs when JS from Apple Events is enabled
+npm run auth:safari-summary    # summarize Safari PlayStation tabs (macOS, JS from Apple Events)
 npm run auth:safari-endpoints  # normalize Safari resource URLs into a redacted endpoint report
+npm run auth:pc-app-summary    # write a redacted PC-app auth/storage summary from Windows artifacts
+
+# ── Browser API probes (Safari/macOS) ────────────────────────────────────────
 npm run api:playstation-web -- list
 npm run api:playstation-web -- probe --ids io.user.details,session.redirect.session --delay-ms 4000
 npm run api:playstation-web-summary
-npm run research:graphql-docs
-npm run research:control-plane
+
+# ── Static inspection ─────────────────────────────────────────────────────────
 npm run inspect:bundle -- /path/to/app.asar
 npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe
-npm run inspect:pc-app         # summarize the installed Windows PlayStation Plus shell + broker surface
-npm run auth:pc-app-summary    # write a redacted PC-app auth/storage summary from local Windows artifacts
-npm run prototype:psplus -- status       # observation-backed MVP CLI for system-browser login, confirm-login flow state, bootstrap, entitlement, and placeholder allocation seams
-npm run capture:metadata       # macOS/Linux tcpdump wrapper for traffic metadata capture
-npm run capture:metadata:windows # Windows pktmon-based metadata capture (run from elevated PowerShell; set CAPTURE_WINDOWS_PORTS=all for stream-phase captures)
-npm run summarize:metadata -- artifacts/network/<capture>.pcapng # uses tshark when available, otherwise falls back to the built-in DNS/TLS metadata summarizer
+npm run inspect:pc-app         # summarize the installed Windows PS Plus shell + broker surface
+
+# ── Network capture ───────────────────────────────────────────────────────────
+npm run capture:metadata                 # macOS/Linux tcpdump wrapper
+npm run capture:metadata:windows         # Windows pktmon (run from elevated PowerShell)
+  # Set CAPTURE_WINDOWS_PORTS=all for stream-phase captures
+npm run summarize:metadata -- artifacts/network/<capture>.pcapng
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+npm run test:unit              # unit tests for auth/endpoint normalization logic
+npm run test:public            # verify collected public evidence has expected signals
+npm run test:psn-login         # official login smoke harness using Playwright
+npm run env:check              # show readiness for login, bundle, and capture workflows
 ```
 
 ## Initial deliverables in this commit series

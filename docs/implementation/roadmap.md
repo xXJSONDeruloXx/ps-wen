@@ -49,6 +49,44 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
   - `reset-flow`
 - **Done**: built-in pcapng summarizer with transport-candidate detection
 
+### Auth token surface (2026-03-30)
+
+- **Done**: all five auth credential layers located and documented
+  - NPSSO + supporting cookies in `%APPDATA%\playstation-now\Cookies` (SQLite, **plaintext** — old Electron runtime, no DPAPI)
+  - JSESSIONID + WEBDUID in `%LOCALAPPDATA%\...\QtWebEngine\Default\Coookies` (note triple-o typo)
+  - Cached access tokens and full authorize request URLs in `%APPDATA%\playstation-now\Cache\data_1`
+- **Done**: complete OAuth client ID and scope map extracted from live browser cache
+  - 5 distinct client IDs with their scopes and response types documented
+  - Gaikai stream client IDs (`7bdba4ee`, `95505df0`) distinguished from OAuth client IDs
+- **Done**: NPSSO → live bearer token exchange confirmed working
+  - `entitlements` client (`dc523cc2`) with implicit grant delivers `access_token` directly
+  - `commerce` client (`bc6b0777`) with code grant delivers authorization code
+- **Done**: live Kamaji `/geo` endpoint confirmed working with bearer token
+  - Returns region (US), timezone (EST), postal code range
+- **Done**: Kamaji session state probe documented
+  - `session-expired` confirmed; JSESSIONID is stale post-session
+  - Re-establishment path identified: app launch → POST to `/kamaji/api/pcnow/00_09_000/user`
+- **Done**: Kamaji session establishment confirmed working standalone (2026-03-30)
+  - Endpoint: `POST /kamaji/api/pcnow/00_09_000/user/session`
+  - Body: form-encoded `country_code + language_code + date_of_birth`
+  - No Authorization header — auth rides Akamai bot-management cookies seeded by any Sony request
+  - Returns JSESSIONID + WEBDUID + sessionUrl in one shot
+  - Session starts as guest (`recognizedSession=false`); recognition step not yet traced
+- **Done**: `/user/stores` confirmed working with guest session
+  - Returns full store/catalog/search/PS-Plus/recs URL map
+- **Done**: complete app `clientIDMap` extracted from live HTML meta tag
+  - Two new client IDs found: `df10acc0` (browser/pachirisu/luxray), `1045850d` (zapdos/jolteon)
+- **Done**: GrandCentral SDK (`grandcentral.js`, 534KB) fetched and saved
+  - Fully obfuscated — no plaintext paths survive; Playwright intercept was necessary
+- **Done**: `session` and `stores` commands added to `psn-direct-cli.ts`
+- **Done**: `auth:intercept-session` Playwright interceptor script
+  - `token` — NPSSO → bearer token or auth code
+  - `geo` — live Kamaji geo query
+  - `session-probe` — Kamaji session health with actionable guidance
+  - `broker` — localhost:1235 WebSocket reachability probe
+  - `status` — combined snapshot of all of the above
+- **Done**: all traps and corrections documented in `docs/status/2026-03-30-psn-auth-token-surface.md`
+
 ## In progress
 
 ### Control plane
@@ -80,6 +118,8 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
 
 ### Highest-value evidence collection
 
+0. **Session-active Kamaji queries** — launch the app, run `npm run api:psn-direct -- session-probe` until it reports `session-active`, then capture `/user` and `/user/entitlements` response shapes as new observation artifacts.  This is the single highest-value next step and requires no additional tooling.
+
 1. **Cleaner click-from-list to picture-only** segmented capture
    - one such run already suggests allocation/startup had progressed into `client.cc` + Sony-owned UDP/2053 before the first visible frame
    - repeat with explicit timing notes for title click and first picture
@@ -91,14 +131,19 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
 
 ### Highest-value implementation work
 
-1. **Broker adapter seam**
-   - model known localhost commands and state transitions cleanly
-2. **Placeholder launch/quit UX**
-   - use current placeholder allocation results + flow state machine
-3. **Diagnostics panel / capture comparison view**
-   - compare launch vs quit vs save-action captures side by side
-4. **Session lifecycle model**
-   - bootstrap -> running -> overlay -> save action -> quit -> post-session
+1. **Session-gated Kamaji commands** — add `user`, `entitlements`, `subscription` subcommands to `psn-direct-cli.ts` once the session-active state is confirmed (needs fresh JSESSIONID from a live app run).
+
+2. **Kamaji session POST body schema** — use a Playwright intercept to capture the exact POST body sent to `/kamaji/api/pcnow/00_09_000/user` during app startup.  This gives the session init schema without a MITM setup.
+
+3. **Broker adapter seam** — with the app running and `broker` reporting reachable, add `broker send <command> [payload]` to `psn-direct-cli.ts` using the `websocket` package in the asar.  Known commands: `startGame`, `stop`, `requestGame`, `requestClientId`, `testConnection`, `setAuthCodes`, `setSettings`, `sendXmbCommand`, `routeInputToPlayer`, `routeInputToClient`, `saveDataDeepLink`, `rawDataDeepLink`, `invitationDeepLink`, `gameAlertDeepLink`, `systemStatusDeepLink`.
+
+4. **Live `prototype:psplus -- status` integration** — replace the static observation provider calls for login/entitlement state with live calls to `queryKamajiGeo()` and `probeKamajiSessionState()` from `psn-auth.ts`, so the prototype CLI reflects real-time state rather than cached artifacts.
+
+5. **Placeholder launch/quit UX** — use current placeholder allocation results + flow state machine
+
+6. **Diagnostics panel / capture comparison view** — compare launch vs quit vs save-action captures side by side
+
+7. **Session lifecycle model** — bootstrap -> running -> overlay -> save action -> quit -> post-session
 
 ## Blocked / missing for a true Sony-app replacement
 
@@ -106,7 +151,7 @@ These are the pieces that still prevent a full standalone replacement of the off
 
 ### Auth/session ownership
 
-- a standalone native auth completion model
+- ~~a standalone native auth completion model~~ **partially resolved**: NPSSO → bearer token exchange confirmed working standalone; full session ownership (JSESSIONID establishment) still requires app-launch POST body schema
 - confirmed post-browser callback/session ownership flow for a third-party app
 
 ### Entitlements

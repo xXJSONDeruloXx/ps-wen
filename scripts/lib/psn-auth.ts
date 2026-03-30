@@ -1,0 +1,786 @@
+/**
+ * PSN auth-token reading and exchange utilities.
+ *
+ * The PlayStation Plus PC client (Electron runtime 9.0.4) stores cookies in a
+ * plain Chromium SQLite format without DPAPI encryption.  That means the NPSSO
+ * and every other session cookie can be read directly from the on-disk SQLite
+ * databases, which are copied to a temp file before reading so they remain safe
+ * to open while the app is running.
+ *
+ * Once we have the NPSSO we can obtain a fresh short-lived bearer token (or auth
+ * code) by driving the same OAuth authorize URL the app itself uses — with the
+ * NPSSO set as a Cookie header.  No password and no re-login are required.
+ *
+ * Observed OAuth client IDs (extracted from live browser cache, data_1):
+ *
+ *   bc6b0777  code  kamaji:commerce_native kamaji:commerce_container kamaji:lists kamaji:s2s.subscriptionsPremium.get
+ *   dc523cc2  token kamaji:get_internal_entitlements user:account.attributes.validate kamaji:get_privacy_settings user:account.settings.privacy.get kamaji:s2s.subscriptionsPremium.get
+ *   7bdba4ee  code  kamaji:commerce_native versa:user_update_entitlements_first_play kamaji:lists
+ *   95505df0  code  kamaji:commerce_native
+ *   52b0e92a  code  sso:none
+ *
+ * Gaikai stream client IDs (from PSN_Event_GotClientId in code cache):
+ *   gkClient      7bdba4ee-43dc-47e9-b3de-f72c95cb5010
+ *   ps3GkClientId 95505df0-0bd8-444a-81b8-8f420c990ca6
+ */
+
+import { DatabaseSync } from 'node:sqlite';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+// ---------------------------------------------------------------------------
+// Known OAuth client parameters observed in the live browser cache
+// ---------------------------------------------------------------------------
+
+export type PsnOAuthClientId =
+  | 'commerce'
+  | 'entitlements'
+  | 'firstplay'
+  | 'commerce-basic'
+  | 'sso';
+
+export const PSN_OAUTH_CLIENTS: Record<
+  PsnOAuthClientId,
+  { clientId: string; responseType: 'code' | 'token'; scope: string }
+> = {
+  /** Main commerce / lists / subscription – authorization_code grant */
+  commerce: {
+    clientId: 'bc6b0777-abb5-40da-92ca-e133cf18e989',
+    responseType: 'code',
+    scope:
+      'kamaji:commerce_native kamaji:commerce_container kamaji:lists kamaji:s2s.subscriptionsPremium.get',
+  },
+  /** Internal entitlements + account attributes – implicit grant → direct access_token */
+  entitlements: {
+    clientId: 'dc523cc2-b51b-4190-bff0-3397c06871b3',
+    responseType: 'token',
+    scope:
+      'kamaji:get_internal_entitlements user:account.attributes.validate kamaji:get_privacy_settings user:account.settings.privacy.get kamaji:s2s.subscriptionsPremium.get',
+  },
+  /** First-play / versa entitlement update – authorization_code grant */
+  firstplay: {
+    clientId: '7bdba4ee-43dc-47e9-b3de-f72c95cb5010',
+    responseType: 'code',
+    scope: 'kamaji:commerce_native versa:user_update_entitlements_first_play kamaji:lists',
+  },
+  /** Basic commerce – authorization_code grant */
+  'commerce-basic': {
+    clientId: '95505df0-0bd8-444a-81b8-8f420c990ca6',
+    responseType: 'code',
+    scope: 'kamaji:commerce_native',
+  },
+  /** SSO-only – authorization_code grant */
+  sso: {
+    clientId: '52b0e92a-e131-4940-86f5-5d4447c73dd1',
+    responseType: 'code',
+    scope: 'sso:none',
+  },
+};
+
+/** Gaikai stream client IDs observed in PSN_Event_GotClientId */
+export const GAIKAI_CLIENT_IDS = {
+  gkClient: '7bdba4ee-43dc-47e9-b3de-f72c95cb5010',
+  ps3GkClientId: '95505df0-0bd8-444a-81b8-8f420c990ca6',
+};
+
+// ---------------------------------------------------------------------------
+// Storage paths
+// ---------------------------------------------------------------------------
+
+export function defaultRoamingCookiesPath(): string {
+  return path.join(os.homedir(), 'AppData', 'Roaming', 'playstation-now', 'Cookies');
+}
+
+export function defaultQtWebEngineCookiesPath(): string {
+  return path.join(
+    os.homedir(),
+    'AppData',
+    'Local',
+    'Sony Interactive Entertainment Inc',
+    'PlayStationPlus',
+    'QtWebEngine',
+    'Default',
+    'Coookies' // NB: typo is in the actual Sony path
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Low-level SQLite cookie reader (copies to temp before opening)
+// ---------------------------------------------------------------------------
+
+export type RawCookie = {
+  hostKey: string;
+  name: string;
+  value: string;
+  path: string;
+  expiresUtcStr: string;
+  isSecure: number;
+};
+
+async function readCookiesFromDb(dbPath: string): Promise<RawCookie[]> {
+  let tmpPath: string | null = null;
+  try {
+    tmpPath = path.join(os.tmpdir(), `ps-wen-cookies-${crypto.randomBytes(6).toString('hex')}.db`);
+    await fs.copyFile(dbPath, tmpPath);
+    const db = new DatabaseSync(tmpPath);
+
+    // Detect which column names this particular SQLite schema uses
+    const cols = db
+      .prepare('pragma table_info(cookies)')
+      .all()
+      .map((r) => String((r as Record<string, unknown>).name ?? ''));
+    const secureCol = cols.includes('is_secure') ? 'is_secure' : cols.includes('secure') ? 'secure' : null;
+    const secureExpr = secureCol ? `COALESCE(${secureCol}, 0)` : '0';
+
+    const rows = db
+      .prepare(
+        `select host_key, name, value, path,
+         CAST(expires_utc AS TEXT) as expires_utc_str,
+         ${secureExpr} as is_secure
+         from cookies
+         order by host_key, name`
+      )
+      .all() as Array<Record<string, unknown>>;
+    db.close();
+    return rows.map((row) => ({
+      hostKey: String(row.host_key ?? ''),
+      name: String(row.name ?? ''),
+      value: String(row.value ?? ''),
+      path: String(row.path ?? ''),
+      expiresUtcStr: String(row.expires_utc_str ?? '0'),
+      isSecure: Number(row.is_secure ?? 0),
+    }));
+  } finally {
+    if (tmpPath) {
+      await fs.unlink(tmpPath).catch(() => undefined);
+    }
+  }
+}
+
+function findCookie(cookies: RawCookie[], name: string, hostHint?: string): string | null {
+  const matching = cookies.filter(
+    (c) => c.name === name && (!hostHint || c.hostKey.includes(hostHint))
+  );
+  return matching[0]?.value ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Public token-reading APIs
+// ---------------------------------------------------------------------------
+
+export type PsnNpssoCookies = {
+  npsso: string;
+  dars: string | null;
+  kpUidz: string | null;
+};
+
+export type PsnSessionCookies = {
+  jsessionId: string | null;
+  webduid: string | null;
+};
+
+export type PsnLocalCookies = {
+  roaming: PsnNpssoCookies;
+  qtWebEngine: PsnSessionCookies;
+};
+
+/**
+ * Read all auth-relevant cookies from both on-disk SQLite databases.
+ * Safe to call while the PlayStation Plus app is running.
+ */
+export async function readLocalPsnCookies(options?: {
+  roamingCookiesPath?: string;
+  qtCookiesPath?: string;
+}): Promise<PsnLocalCookies> {
+  const roamingPath = options?.roamingCookiesPath ?? defaultRoamingCookiesPath();
+  const qtPath = options?.qtCookiesPath ?? defaultQtWebEngineCookiesPath();
+
+  const [roamingCookies, qtCookies] = await Promise.all([
+    fs
+      .access(roamingPath)
+      .then(() => readCookiesFromDb(roamingPath))
+      .catch(() => [] as RawCookie[]),
+    fs
+      .access(qtPath)
+      .then(() => readCookiesFromDb(qtPath))
+      .catch(() => [] as RawCookie[]),
+  ]);
+
+  return {
+    roaming: {
+      npsso: findCookie(roamingCookies, 'npsso', 'sony.com') ?? '',
+      dars: findCookie(roamingCookies, 'dars', 'sony.com'),
+      kpUidz: findCookie(roamingCookies, 'KP_uIDz', 'sony.com'),
+    },
+    qtWebEngine: {
+      jsessionId: findCookie(qtCookies, 'JSESSIONID', 'psnow.playstation.com'),
+      webduid: findCookie(qtCookies, 'WEBDUID', 'psnow.playstation.com'),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// OAuth exchange helpers
+// ---------------------------------------------------------------------------
+
+const OAUTH_AUTHORIZE_BASE = 'https://ca.account.sony.com/api/v1/oauth/authorize';
+const PSNOW_REDIRECT_URI =
+  'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/grc-response.html';
+const OBSERVED_DUID = '000000070040008864383a34333a61653a31343a35613a6130';
+
+function buildAuthorizeUrl(
+  clientId: string,
+  responseType: 'code' | 'token',
+  scope: string,
+  duid = OBSERVED_DUID
+): string {
+  const params = new URLSearchParams({
+    smcid: 'pc:psnow',
+    applicationId: 'psnow',
+    response_type: responseType,
+    scope,
+    client_id: clientId,
+    redirect_uri: PSNOW_REDIRECT_URI,
+    grant_type: 'authorization_code',
+    service_entity: 'urn:service-entity:psn',
+    prompt: 'none',
+    renderMode: 'mobilePortrait',
+    hidePageElements: 'forgotPasswordLink',
+    displayFooter: 'none',
+    disableLinks: 'qriocityLink',
+    mid: 'PSNOW',
+    layout_type: 'popup',
+    service_logo: 'ps',
+    tp_psn: 'true',
+    noEVBlock: 'true',
+    duid,
+  });
+  return `${OAUTH_AUTHORIZE_BASE}?${params.toString()}`;
+}
+
+export type TokenExchangeResult = {
+  accessToken: string;
+  tokenType: string;
+  expiresIn: number;
+  correlationId: string;
+  obtainedAt: string;
+  clientId: string;
+  scope: string;
+};
+
+export type CodeExchangeResult = {
+  code: string;
+  correlationId: string;
+  obtainedAt: string;
+  clientId: string;
+  scope: string;
+};
+
+/**
+ * Exchange NPSSO for a fresh bearer access_token via the implicit (token) grant.
+ * Uses the observed `entitlements` client by default which covers the broadest
+ * set of Kamaji scopes for API queries.
+ */
+export async function exchangeNpssoForToken(
+  npsso: string,
+  clientName: PsnOAuthClientId = 'entitlements',
+  duid = OBSERVED_DUID
+): Promise<TokenExchangeResult> {
+  const client = PSN_OAUTH_CLIENTS[clientName];
+  if (client.responseType !== 'token') {
+    throw new Error(
+      `Client "${clientName}" uses response_type=code, not token. Use exchangeNpssoForCode instead.`
+    );
+  }
+
+  const url = buildAuthorizeUrl(client.clientId, 'token', client.scope, duid);
+  const response = await fetch(url, {
+    method: 'GET',
+    redirect: 'manual',
+    headers: {
+      Cookie: `npsso=${npsso}`,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) gkApollo',
+    },
+  });
+
+  if (response.status !== 302) {
+    const body = await response.text().catch(() => '');
+    throw new Error(
+      `Expected 302 redirect from OAuth authorize, got ${response.status}. Body: ${body.slice(0, 300)}`
+    );
+  }
+
+  const location = response.headers.get('location') ?? '';
+  const tokenMatch = location.match(/[#&]access_token=([^&\s]+)/);
+  const cidMatch = location.match(/[#&]cid=([^&\s]+)/);
+  const typeMatch = location.match(/[#&]token_type=([^&\s]+)/);
+  const expiresMatch = location.match(/[#&]expires_in=([^&\s]+)/);
+
+  if (!tokenMatch) {
+    throw new Error(`No access_token in redirect location: ${location.slice(0, 300)}`);
+  }
+
+  return {
+    accessToken: decodeURIComponent(tokenMatch[1]),
+    tokenType: typeMatch ? decodeURIComponent(typeMatch[1]) : 'bearer',
+    expiresIn: expiresMatch ? Number(expiresMatch[1]) : 1199,
+    correlationId: cidMatch ? decodeURIComponent(cidMatch[1]) : '',
+    obtainedAt: new Date().toISOString(),
+    clientId: client.clientId,
+    scope: client.scope,
+  };
+}
+
+/**
+ * Exchange NPSSO for a short-lived authorization code via the code grant.
+ */
+export async function exchangeNpssoForCode(
+  npsso: string,
+  clientName: PsnOAuthClientId = 'commerce',
+  duid = OBSERVED_DUID
+): Promise<CodeExchangeResult> {
+  const client = PSN_OAUTH_CLIENTS[clientName];
+  const url = buildAuthorizeUrl(client.clientId, 'code', client.scope, duid);
+  const response = await fetch(url, {
+    method: 'GET',
+    redirect: 'manual',
+    headers: {
+      Cookie: `npsso=${npsso}`,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) gkApollo',
+    },
+  });
+
+  if (response.status !== 302) {
+    const body = await response.text().catch(() => '');
+    throw new Error(
+      `Expected 302 redirect from OAuth authorize, got ${response.status}. Body: ${body.slice(0, 300)}`
+    );
+  }
+
+  const location = response.headers.get('location') ?? '';
+  const codeMatch = location.match(/[?&]code=([^&\s]+)/);
+  const cidMatch = location.match(/[?&]cid=([^&\s]+)/);
+
+  if (!codeMatch) {
+    throw new Error(`No code in redirect location: ${location.slice(0, 300)}`);
+  }
+
+  return {
+    code: decodeURIComponent(codeMatch[1]),
+    correlationId: cidMatch ? decodeURIComponent(cidMatch[1]) : '',
+    obtainedAt: new Date().toISOString(),
+    clientId: client.clientId,
+    scope: client.scope,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Live Kamaji API helpers
+// ---------------------------------------------------------------------------
+
+export type KamajiGeoResult = {
+  region: string;
+  postalCodes: string;
+  timezone: string;
+  queriedAt: string;
+};
+
+/** Query the geo endpoint — works with any valid bearer token (or none). */
+export async function queryKamajiGeo(accessToken?: string): Promise<KamajiGeoResult> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) gkApollo',
+  };
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+
+  const response = await fetch(
+    'https://psnow.playstation.com/kamaji/api/psnow/00_09_000/geo',
+    { headers }
+  );
+
+  const body = (await response.json()) as {
+    header?: { status_code?: string; message_key?: string };
+    data?: string;
+    postal_code?: string;
+    timezone?: string;
+  };
+
+  if (body.header?.status_code !== '0x0000') {
+    throw new Error(
+      `Kamaji geo returned error: ${body.header?.message_key ?? 'unknown'} (${body.header?.status_code ?? '?'})`
+    );
+  }
+
+  return {
+    region: body.data ?? '',
+    postalCodes: body.postal_code ?? '',
+    timezone: body.timezone ?? '',
+    queriedAt: new Date().toISOString(),
+  };
+}
+
+export type KamajiSessionStatus =
+  | 'no-session'
+  | 'session-active'
+  | 'session-expired'
+  | 'auth-required'
+  | 'unknown';
+
+/**
+ * Probe a session-gated Kamaji endpoint to classify the current session state.
+ * Returns the raw status code and a normalized status string.
+ */
+export async function probeKamajiSessionState(
+  accessToken: string,
+  jsessionId?: string | null,
+  webduid?: string | null
+): Promise<{ status: KamajiSessionStatus; httpStatus: number; rawCode: string }> {
+  const cookies: string[] = [];
+  if (jsessionId) cookies.push(`JSESSIONID=${jsessionId}`);
+  if (webduid) cookies.push(`WEBDUID=${webduid}`);
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) gkApollo',
+  };
+  if (cookies.length > 0) {
+    headers['Cookie'] = cookies.join('; ');
+  }
+
+  const response = await fetch(
+    'https://psnow.playstation.com/kamaji/api/psnow/00_09_000/user',
+    { headers }
+  );
+
+  const body = (await response.json().catch(() => ({}))) as {
+    header?: { status_code?: string; message_key?: string };
+  };
+
+  const rawCode = body.header?.status_code ?? '';
+  let sessionStatus: KamajiSessionStatus;
+
+  if (response.status === 200 && rawCode === '0x0000') {
+    sessionStatus = 'session-active';
+  } else if (rawCode === '0x0005') {
+    sessionStatus = jsessionId ? 'session-expired' : 'no-session';
+  } else if (response.status === 401 || response.status === 403) {
+    sessionStatus = 'auth-required';
+  } else {
+    sessionStatus = 'unknown';
+  }
+
+  return { status: sessionStatus, httpStatus: response.status, rawCode };
+}
+
+// ---------------------------------------------------------------------------
+// Broker WebSocket probe helpers
+// ---------------------------------------------------------------------------
+
+export type BrokerProbeResult = {
+  reachable: boolean;
+  url: string;
+  probedAt: string;
+  error?: string;
+};
+
+// ---------------------------------------------------------------------------
+// Kamaji session establishment
+// ---------------------------------------------------------------------------
+
+/**
+ * The Electron app uses runtime 9.0.4's Chromium, which means its Akamai
+ * bot-management cookies (_abck, bm_sz) are seeded by ANY request that reaches
+ * ca.account.sony.com.  The Kamaji /user/session endpoint validates those
+ * cookies as a bot-protection gate before creating a new JSESSIONID.
+ *
+ * Confirmed flow (intercepted via Playwright 2026-03-30):
+ *   1. GET ca.account.sony.com/api/v1/oauth/authorize?...&client_id=bc6b0777...
+ *      → receives _abck + bm_sz Set-Cookie headers (even on 403)
+ *   2. POST psnow.playstation.com/kamaji/api/pcnow/00_09_000/user/session
+ *      body (form-encoded): country_code=US&language_code=en&date_of_birth=YYYY-MM-DD
+ *      cookie: the _abck + bm_sz from step 1 + akacd_psnow-manifest
+ *      → 200  Set-Cookie: JSESSIONID=...  WEBDUID=...
+ *      → body: { data: { sessionUrl, recognizedSession:false, age, country, ... } }
+ *
+ * The initial session has recognizedSession=false (guest context).  Authenticated
+ * endpoints (/user, /user/entitlements, /user/subscription) require the session
+ * to be "recognized" — a subsequent GrandCentral SDK step we have not yet fully
+ * traced.  Guest-context endpoints that work immediately: /user/stores, /geo.
+ *
+ * The date_of_birth must match the Sony account.  The value observed in
+ * production was 1981-01-01 (age 45 at time of capture).
+ */
+
+export type KamajiSessionResult = {
+  jsessionId: string;
+  webduid: string;
+  sessionUrl: string;
+  country: string;
+  language: string;
+  age: number;
+  accountType: number;
+  recognizedSession: boolean;
+  accountId: string | null;
+  onlineId: string | null;
+  currencies: Array<{ code: string; symbol: string }>;
+  establishedAt: string;
+};
+
+const AKAMAI_SEED_URL =
+  'https://ca.account.sony.com/api/v1/oauth/authorize' +
+  '?smcid=pc%3Apsnow&applicationId=psnow&response_type=code' +
+  '&scope=kamaji%3Acommerce_native%20kamaji%3Acommerce_container%20kamaji%3Alists%20kamaji%3As2s.subscriptionsPremium.get' +
+  '&client_id=bc6b0777-abb5-40da-92ca-e133cf18e989' +
+  '&redirect_uri=https%3A%2F%2Fpsnow.playstation.com%2Fapp%2F2.2.0%2F133%2F5cdcc037d%2Fgrc-response.html' +
+  '&service_entity=urn%3Aservice-entity%3Apsn&prompt=none&renderMode=mobilePortrait' +
+  '&hidePageElements=forgotPasswordLink&displayFooter=none&disableLinks=qriocityLink' +
+  '&mid=PSNOW&layout_type=popup&service_logo=ps&tp_psn=true&noEVBlock=true' +
+  `&duid=${OBSERVED_DUID}`;
+
+const KAMAJI_SESSION_URL =
+  'https://psnow.playstation.com/kamaji/api/pcnow/00_09_000/user/session';
+
+// Persistent CDN routing cookie observed in the Qt WebEngine store
+const AKACD_COOKIE =
+  'akacd_psnow-manifest=2177452799~rv=99~id=62761835be9be88fe3ee3bfadc057b1e';
+
+const APP_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)' +
+  ' Chrome/87.0.4280.141 Electron/11.2.3 Safari/537.36 gkApollo';
+
+/**
+ * Establish a fresh Kamaji guest session from scratch using only the NPSSO.
+ *
+ * @param npsso     - Raw NPSSO cookie value from the local SQLite store
+ * @param dateOfBirth - User's date of birth in YYYY-MM-DD format.  Must match
+ *                    the Sony account.  The app uses the value returned by the
+ *                    GrandCentral UserSessionService — observed as 1981-01-01.
+ * @param countryCode  - ISO 3166-1 alpha-2 country code (default: 'US')
+ * @param languageCode - BCP 47 language subtag (default: 'en')
+ */
+export async function establishKamajiSession(
+  npsso: string,
+  dateOfBirth: string,
+  countryCode = 'US',
+  languageCode = 'en'
+): Promise<KamajiSessionResult> {
+  // Step 1: seed Akamai bot-management cookies via any request to Sony auth
+  const seedResp = await fetch(AKAMAI_SEED_URL, {
+    redirect: 'follow',
+    headers: {
+      Cookie: `npsso=${npsso}`,
+      'User-Agent': APP_UA,
+      Referer: 'https://psnow.playstation.com/',
+      Accept: 'text/html,application/xhtml+xml,*/*',
+    },
+  });
+
+  const seedCookies = (seedResp.headers as unknown as { getSetCookie?: () => string[] })
+    .getSetCookie?.() ?? [seedResp.headers.get('set-cookie') ?? ''].filter(Boolean);
+
+  const bmSz = seedCookies.find((c) => c.startsWith('bm_sz='))?.split(';')[0] ?? '';
+  const abck = seedCookies.find((c) => c.startsWith('_abck='))?.split(';')[0] ?? '';
+
+  const cookieStr = [bmSz, abck, AKACD_COOKIE].filter(Boolean).join('; ');
+
+  // Step 2: POST to /user/session with demographics
+  const body = new URLSearchParams({
+    country_code: countryCode,
+    language_code: languageCode,
+    date_of_birth: dateOfBirth,
+  }).toString();
+
+  const sessionResp = await fetch(KAMAJI_SESSION_URL, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: '*/*',
+      'User-Agent': APP_UA,
+      Origin: 'https://psnow.playstation.com',
+      Referer: 'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/',
+      Cookie: cookieStr,
+    },
+    body,
+  });
+
+  if (!sessionResp.ok && sessionResp.status !== 200) {
+    const errBody = await sessionResp.text().catch(() => '');
+    throw new Error(
+      `Kamaji session POST failed: ${sessionResp.status}. Body: ${errBody.slice(0, 300)}`
+    );
+  }
+
+  const sessionCookies = (
+    sessionResp.headers as unknown as { getSetCookie?: () => string[] }
+  ).getSetCookie?.() ?? [sessionResp.headers.get('set-cookie') ?? ''].filter(Boolean);
+
+  const jsessionId =
+    sessionCookies.find((c) => c.startsWith('JSESSIONID='))?.split(';')[0].split('=')[1] ?? '';
+  const webduid =
+    sessionCookies.find((c) => c.startsWith('WEBDUID='))?.split(';')[0].split('=')[1] ?? '';
+
+  const json = (await sessionResp.json()) as {
+    header?: { status_code?: string; message_key?: string };
+    data?: {
+      sessionUrl?: string;
+      country?: string;
+      language?: string;
+      age?: number;
+      account_type?: number;
+      recognizedSession?: boolean;
+      accountId?: string | null;
+      onlineId?: string | null;
+      currencies?: Array<{ code?: string; symbol?: string }>;
+    };
+  };
+
+  if (json.header?.status_code !== '0x0000') {
+    throw new Error(
+      `Kamaji session init error: ${json.header?.message_key ?? 'unknown'} (${json.header?.status_code ?? '?'})`
+    );
+  }
+
+  if (!jsessionId) {
+    throw new Error('Kamaji session POST succeeded but no JSESSIONID was returned.');
+  }
+
+  const data = json.data ?? {};
+  return {
+    jsessionId,
+    webduid,
+    sessionUrl: data.sessionUrl ?? 'https://psnow.playstation.com/kamaji/api/pcnow/00_09_000/',
+    country: data.country ?? countryCode,
+    language: data.language ?? languageCode,
+    age: data.age ?? 0,
+    accountType: data.account_type ?? 0,
+    recognizedSession: data.recognizedSession ?? false,
+    accountId: data.accountId ?? null,
+    onlineId: data.onlineId ?? null,
+    currencies: (data.currencies ?? []).map((c) => ({ code: c.code ?? '', symbol: c.symbol ?? '' })),
+    establishedAt: new Date().toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Guest-session Kamaji queries (work with recognizedSession=false)
+// ---------------------------------------------------------------------------
+
+export type KamajiStoresResult = {
+  baseUrl: string;
+  searchUrl: string;
+  rootUrl: string;
+  tumblerUrl: string;
+  externalSigninUrl: string;
+  psPlusUrl: string;
+  eventsEnv: string;
+  recUrl: string;
+  psPlusWelcomeMatUrl: string;
+  psPlusDealsUrl: string;
+  queriedAt: string;
+};
+
+/**
+ * Fetch store URLs — works with any JSESSIONID, even a guest session.
+ * Returns the full store/search/PS-Plus URL map.
+ */
+export async function queryKamajiUserStores(
+  accessToken: string,
+  jsessionId: string,
+  webduid: string
+): Promise<KamajiStoresResult> {
+  const cookieStr = `JSESSIONID=${jsessionId}; WEBDUID=${webduid}`;
+  const response = await fetch(
+    'https://psnow.playstation.com/kamaji/api/psnow/00_09_000/user/stores',
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'User-Agent': APP_UA,
+        Origin: 'https://psnow.playstation.com',
+        Cookie: cookieStr,
+      },
+    }
+  );
+
+  const json = (await response.json()) as {
+    header?: { status_code?: string; message_key?: string };
+    data?: {
+      base_url?: string;
+      search_url?: string;
+      root_url?: string;
+      tumbler_url?: string;
+      external_signin_url?: string;
+      psplus_url?: string;
+      events_env?: string;
+      rec_url?: string;
+      psPlusWelcomeMatUrl?: string;
+      psPlusDealsUrl?: string;
+    };
+  };
+
+  if (json.header?.status_code !== '0x0000') {
+    throw new Error(
+      `Kamaji user/stores error: ${json.header?.message_key ?? 'unknown'} (${json.header?.status_code ?? '?'})`
+    );
+  }
+
+  const d = json.data ?? {};
+  return {
+    baseUrl: d.base_url ?? '',
+    searchUrl: d.search_url ?? '',
+    rootUrl: d.root_url ?? '',
+    tumblerUrl: d.tumbler_url ?? '',
+    externalSigninUrl: d.external_signin_url ?? '',
+    psPlusUrl: d.psplus_url ?? '',
+    eventsEnv: d.events_env ?? '',
+    recUrl: d.rec_url ?? '',
+    psPlusWelcomeMatUrl: d.psPlusWelcomeMatUrl ?? '',
+    psPlusDealsUrl: d.psPlusDealsUrl ?? '',
+    queriedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Check whether the localhost broker WebSocket is reachable.
+ * Uses an HTTP upgrade check via the known WebSocket URL.
+ * Does not require the 'websocket' npm package — just checks TCP reachability
+ * via a plain GET to the WS endpoint (expecting a 101 or 400).
+ */
+export async function probeBrokerReachability(
+  host = 'localhost',
+  port = 1235
+): Promise<BrokerProbeResult> {
+  const url = `http://${host}:${port}/`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(url, {
+      headers: {
+        Upgrade: 'websocket',
+        Connection: 'Upgrade',
+        'Sec-WebSocket-Key': Buffer.from(crypto.randomBytes(16)).toString('base64'),
+        'Sec-WebSocket-Version': '13',
+      },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+    // 101 = upgraded, 400 = bad request but port is open, both mean reachable
+    return {
+      reachable: response.status === 101 || response.status === 400,
+      url: `ws://${host}:${port}/`,
+      probedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      reachable: false,
+      url: `ws://${host}:${port}/`,
+      probedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
