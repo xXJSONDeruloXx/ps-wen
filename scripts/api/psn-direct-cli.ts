@@ -16,6 +16,8 @@
  *   npm run api:psn-direct -- geo [--json]
  *   npm run api:psn-direct -- session-probe [--json]
  *   npm run api:psn-direct -- broker [--host localhost] [--port 1235] [--json]
+ *   npm run api:psn-direct -- broker send <command> [payload-json] [--target QAS] [--wait-ms 1500] [--json]
+ *   npm run api:psn-direct -- broker send --raw '{"command":"requestClientId"}' [--json]
  *   npm run api:psn-direct -- status [--json]
  */
 
@@ -66,6 +68,9 @@ function usage(): never {
       '  npm run api:psn-direct -- catalog [--cat STORE-MSF192018-APOLLOROOT] [--size 20] [--dob YYYY-MM-DD] [--json]',
       '  npm run api:psn-direct -- session-probe [--json]',
       '  npm run api:psn-direct -- broker [--host localhost] [--port 1235] [--json]',
+      '  npm run api:psn-direct -- broker send <command> [payload-json] [--target QAS] [--wait-ms 1500] [--json]',
+      '  npm run api:psn-direct -- broker send --payload <json> <command>',
+      '  npm run api:psn-direct -- broker send --raw <text>',
       '  npm run api:psn-direct -- status [--json]',
       '',
       'Global NPSSO sources (checked in this order):',
@@ -98,6 +103,23 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function asJson(parsed: ParsedArgs) { return Boolean(parsed.flags.json); }
+
+function safeJsonParse(text: string): unknown | undefined {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseJsonFlag(raw: string, label: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid JSON for ${label}: ${detail}`);
+  }
+}
 
 async function writeArtifact(data: unknown, outputPath: string) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
@@ -546,7 +568,268 @@ function sessionStatusNotes(status: string): string[] {
 
 // ---------------------------------------------------------------------------
 // broker  — probe localhost:1235 broker WebSocket reachability
+// broker send — send a raw or structured message and collect replies
 // ---------------------------------------------------------------------------
+type BrokerReceivedMessage = {
+  receivedAt: string;
+  kind: 'text' | 'binary';
+  text: string | null;
+  json: unknown | null;
+  sizeBytes: number;
+};
+
+async function decodeBrokerMessage(data: unknown): Promise<BrokerReceivedMessage> {
+  const receivedAt = new Date().toISOString();
+
+  if (typeof data === 'string') {
+    return {
+      receivedAt,
+      kind: 'text',
+      text: data,
+      json: safeJsonParse(data) ?? null,
+      sizeBytes: Buffer.byteLength(data, 'utf8'),
+    };
+  }
+
+  let buffer: Buffer | null = null;
+
+  if (data instanceof ArrayBuffer) {
+    buffer = Buffer.from(data);
+  } else if (ArrayBuffer.isView(data)) {
+    buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  } else if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    buffer = Buffer.from(await data.arrayBuffer());
+  }
+
+  if (!buffer) {
+    const text = String(data);
+    return {
+      receivedAt,
+      kind: 'text',
+      text,
+      json: safeJsonParse(text) ?? null,
+      sizeBytes: Buffer.byteLength(text, 'utf8'),
+    };
+  }
+
+  const text = buffer.toString('utf8');
+  const json = safeJsonParse(text) ?? null;
+  return {
+    receivedAt,
+    kind: json !== null || text.trim().length > 0 ? 'text' : 'binary',
+    text,
+    json,
+    sizeBytes: buffer.byteLength,
+  };
+}
+
+async function sendBrokerMessage(options: {
+  url: string;
+  messageText: string;
+  waitMs: number;
+}): Promise<{
+  url: string;
+  opened: boolean;
+  sentAt: string | null;
+  closedAt: string | null;
+  closeCode: number | null;
+  closeReason: string | null;
+  closeWasClean: boolean | null;
+  error: string | null;
+  received: BrokerReceivedMessage[];
+}> {
+  const { url, messageText, waitMs } = options;
+
+  return new Promise((resolve) => {
+    const received: BrokerReceivedMessage[] = [];
+    let opened = false;
+    let sentAt: string | null = null;
+    let closedAt: string | null = null;
+    let closeCode: number | null = null;
+    let closeReason: string | null = null;
+    let closeWasClean: boolean | null = null;
+    let error: string | null = null;
+    let settled = false;
+
+    const ws = new WebSocket(url);
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(sendTimer);
+      clearTimeout(forceTimer);
+      resolve({
+        url,
+        opened,
+        sentAt,
+        closedAt,
+        closeCode,
+        closeReason,
+        closeWasClean,
+        error,
+        received,
+      });
+    };
+
+    const sendTimer = setTimeout(() => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        try {
+          ws.close();
+        } catch {
+          settle();
+        }
+      } else {
+        settle();
+      }
+    }, waitMs);
+
+    const forceTimer = setTimeout(() => {
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+      settle();
+    }, waitMs + 2000);
+
+    ws.addEventListener('open', () => {
+      opened = true;
+      sentAt = new Date().toISOString();
+      ws.send(messageText);
+    });
+
+    ws.addEventListener('message', (event) => {
+      void decodeBrokerMessage(event.data)
+        .then((message) => {
+          received.push(message);
+        })
+        .catch((decodeError) => {
+          const detail = decodeError instanceof Error ? decodeError.message : String(decodeError);
+          received.push({
+            receivedAt: new Date().toISOString(),
+            kind: 'text',
+            text: `[decode-error] ${detail}`,
+            json: null,
+            sizeBytes: Buffer.byteLength(detail, 'utf8'),
+          });
+        });
+    });
+
+    ws.addEventListener('error', (event) => {
+      const maybeError = event as Event & { error?: unknown; message?: string };
+      if (typeof maybeError.message === 'string' && maybeError.message.trim()) {
+        error = maybeError.message;
+        return;
+      }
+      if (maybeError.error instanceof Error) {
+        error = maybeError.error.message;
+        return;
+      }
+      if (maybeError.error) {
+        error = String(maybeError.error);
+        return;
+      }
+      error = error ?? 'WebSocket error';
+    });
+
+    ws.addEventListener('close', (event) => {
+      closedAt = new Date().toISOString();
+      closeCode = event.code;
+      closeReason = event.reason || null;
+      closeWasClean = event.wasClean;
+      settle();
+    });
+  });
+}
+
+async function cmdBrokerSend(parsed: ParsedArgs) {
+  const host = typeof parsed.flags.host === 'string' ? parsed.flags.host : 'localhost';
+  const port = typeof parsed.flags.port === 'string' ? Number(parsed.flags.port) : 1235;
+  const waitMs = typeof parsed.flags['wait-ms'] === 'string' ? Number(parsed.flags['wait-ms']) : 1500;
+  if (!Number.isFinite(waitMs) || waitMs < 0) {
+    throw new Error(`Invalid --wait-ms value: ${parsed.flags['wait-ms']}`);
+  }
+
+  const url = `ws://${host}:${port}/`;
+  const target = typeof parsed.flags.target === 'string' ? parsed.flags.target : null;
+  const rawText = typeof parsed.flags.raw === 'string' ? parsed.flags.raw : null;
+  const messageFlag = typeof parsed.flags.message === 'string' ? parsed.flags.message : null;
+  const payloadFlag = typeof parsed.flags.payload === 'string' ? parsed.flags.payload : null;
+
+  let mode: 'raw' | 'message' | 'command' = 'command';
+  let messageText = '';
+  let sentJson: unknown = null;
+  let commandName: string | null = null;
+  let payload: unknown = null;
+
+  if (rawText !== null) {
+    mode = 'raw';
+    messageText = rawText;
+    sentJson = safeJsonParse(rawText) ?? null;
+  } else if (messageFlag !== null) {
+    mode = 'message';
+    sentJson = parseJsonFlag(messageFlag, '--message');
+    messageText = JSON.stringify(sentJson);
+  } else {
+    commandName = parsed.positional[1] ?? null;
+    if (!commandName) {
+      throw new Error('Usage: broker send <command> [payload-json] [--target QAS] [--wait-ms 1500] or broker send --raw <text>');
+    }
+    const positionalPayload = parsed.positional[2];
+    const rawPayload = payloadFlag ?? positionalPayload;
+    payload = rawPayload ? parseJsonFlag(rawPayload, '--payload') : {};
+    const envelope: Record<string, unknown> = {
+      command: commandName,
+      params: payload,
+    };
+    if (target) envelope.target = target;
+    sentJson = envelope;
+    messageText = JSON.stringify(envelope);
+  }
+
+  const result = await sendBrokerMessage({ url, messageText, waitMs });
+  const output = {
+    generatedAt: new Date().toISOString(),
+    mode,
+    command: commandName,
+    target,
+    waitMs,
+    sentText: messageText,
+    sentJson,
+    ...result,
+    notes: [
+      'This command only sends a WebSocket message and records replies.',
+      'The broker protocol is only partially characterized; use --raw for exact replay when needed.',
+      'Known preload commands from asar: startGame, stop, requestGame, requestClientId, testConnection, setAuthCodes, setSettings, sendXmbCommand, routeInputToPlayer, routeInputToClient, saveDataDeepLink, rawDataDeepLink, invitationDeepLink, gameAlertDeepLink, systemStatusDeepLink.',
+    ],
+  };
+
+  if (asJson(parsed)) {
+    console.log(JSON.stringify(output, null, 2));
+    return;
+  }
+
+  console.log(`Broker URL   : ${output.url}`);
+  console.log(`Opened       : ${output.opened}`);
+  console.log(`Mode         : ${output.mode}`);
+  if (output.command) console.log(`Command      : ${output.command}`);
+  if (output.target) console.log(`Target       : ${output.target}`);
+  console.log(`Waited       : ${output.waitMs}ms`);
+  console.log(`Sent         : ${output.sentText}`);
+  console.log(`Received     : ${output.received.length} message(s)`);
+  for (const [index, message] of output.received.entries()) {
+    const preview = message.text ? message.text.slice(0, 240) : '(binary)';
+    console.log(`  [${index}] ${message.kind} ${message.sizeBytes}B ${preview}`);
+  }
+  if (output.error) console.log(`Error        : ${output.error}`);
+  if (output.closeCode !== null) {
+    console.log(`Close        : ${output.closeCode}${output.closeReason ? ` (${output.closeReason})` : ''}`);
+  }
+  for (const note of output.notes) {
+    console.log(`Note         : ${note}`);
+  }
+}
+
 async function cmdBroker(parsed: ParsedArgs) {
   const host = typeof parsed.flags.host === 'string' ? parsed.flags.host : 'localhost';
   const port = typeof parsed.flags.port === 'string' ? Number(parsed.flags.port) : 1235;
@@ -560,6 +843,7 @@ async function cmdBroker(parsed: ParsedArgs) {
       ? [
           'PlayStation Plus broker is reachable. The native client is running.',
           'Known preload commands from asar: startGame, stop, requestGame, requestClientId, testConnection, setAuthCodes, setSettings, sendXmbCommand, routeInputToPlayer, routeInputToClient, saveDataDeepLink, rawDataDeepLink, invitationDeepLink, gameAlertDeepLink, systemStatusDeepLink.',
+          'Use `broker send <command>` to try live command replay.',
           'Observed window events: blur, focus.',
         ]
       : [
@@ -758,7 +1042,10 @@ async function main() {
   if (parsed.command === 'manifest') return cmdManifest(parsed);
   if (parsed.command === 'catalog') return cmdCatalog(parsed);
   if (parsed.command === 'session-probe') return cmdSessionProbe(parsed);
-  if (parsed.command === 'broker') return cmdBroker(parsed);
+  if (parsed.command === 'broker') {
+    if (parsed.positional[0] === 'send') return cmdBrokerSend(parsed);
+    return cmdBroker(parsed);
+  }
   if (parsed.command === 'status') return cmdStatus(parsed);
 
   usage();

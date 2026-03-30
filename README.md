@@ -63,6 +63,9 @@ npm run api:psn-direct -- catalog --cat STORE-MSF192018-APOLLO_ACTION --size 10
   # examples confirmed: Guardians of the Galaxy, Far Cry 6, Deus Ex, Killing Floor 2
 npm run api:psn-direct -- session-probe           # verifies token session by hitting profile + entitlements
 npm run api:psn-direct -- broker                  # localhost:1235 broker reachability + command list
+npm run api:psn-direct -- broker send requestClientId --wait-ms 1500
+npm run api:psn-direct -- broker send setSettings '{"apolloSessionId":"...","entitlementID":"..."}'
+npm run api:psn-direct -- broker send --raw '{"command":"requestClientId","params":{}}'
 npm run api:psn-direct -- <cmd> --json            # machine-readable output for any command
 
 # ── Session intercept (Playwright) ─────────────────────────────────────────────
