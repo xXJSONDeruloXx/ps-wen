@@ -27,7 +27,6 @@ import {
   exchangeNpssoForToken,
   exchangeNpssoForCode,
   queryKamajiGeo,
-  probeKamajiSessionState,
   probeBrokerReachability,
   establishKamajiSession,
   establishKamajiAccessTokenSession,
@@ -595,9 +594,21 @@ async function cmdStatus(parsed: ParsedArgs) {
     obtained: false,
   };
   let geoResult: { region?: string; timezone?: string; error?: string } = {};
-  let sessionProbe: { status: string; httpStatus: number; error?: string } = {
+  let sessionSummary: {
+    status: string;
+    jsessionIdPresent: boolean;
+    webduidPresent: boolean;
+    recognizedSession?: boolean;
+    accountIdPresent?: boolean;
+    onlineIdPresent?: boolean;
+    profileOk?: boolean;
+    entitlementsOk?: boolean;
+    entitlementCount?: number | null;
+    error?: string | null;
+  } = {
     status: 'skipped',
-    httpStatus: 0,
+    jsessionIdPresent: false,
+    webduidPresent: false,
   };
   let brokerProbe: { reachable: boolean; error?: string } = { reachable: false };
 
@@ -606,13 +617,8 @@ async function cmdStatus(parsed: ParsedArgs) {
       const exchange = await exchangeNpssoForToken(npssoResolution.npsso, 'entitlements');
       tokenResult = { obtained: true, expiresIn: exchange.expiresIn, scope: exchange.scope };
 
-      const [geo, session, broker] = await Promise.allSettled([
+      const [geo, broker] = await Promise.allSettled([
         queryKamajiGeo(exchange.accessToken),
-        probeKamajiSessionState(
-          exchange.accessToken,
-          cookies.qtWebEngine.jsessionId,
-          cookies.qtWebEngine.webduid
-        ),
         probeBrokerReachability(),
       ]);
 
@@ -622,14 +628,51 @@ async function cmdStatus(parsed: ParsedArgs) {
         geoResult = { error: geo.reason instanceof Error ? geo.reason.message : String(geo.reason) };
       }
 
-      if (session.status === 'fulfilled') {
-        sessionProbe = { status: session.value.status, httpStatus: session.value.httpStatus };
-      } else {
-        sessionProbe = { status: 'error', httpStatus: 0, error: String(session.reason) };
-      }
-
       if (broker.status === 'fulfilled') {
         brokerProbe = { reachable: broker.value.reachable, error: broker.value.error };
+      }
+
+      try {
+        const session = await establishKamajiAccessTokenSession(npssoResolution.npsso, exchange.accessToken);
+        let profileOk = false;
+        let entitlementsOk = false;
+        let entitlementCount: number | null = null;
+        let sessionError: string | null = null;
+
+        try {
+          await queryKamajiUserProfile(exchange.accessToken, session.jsessionId, session.webduid);
+          profileOk = true;
+        } catch (error) {
+          sessionError = error instanceof Error ? error.message : String(error);
+        }
+
+        try {
+          const entitlements = await queryKamajiUserEntitlements(exchange.accessToken, session.jsessionId, session.webduid);
+          entitlementsOk = true;
+          entitlementCount = entitlements.totalResults;
+        } catch (error) {
+          sessionError = sessionError ?? (error instanceof Error ? error.message : String(error));
+        }
+
+        sessionSummary = {
+          status: profileOk || entitlementsOk ? 'session-active' : 'session-partial',
+          jsessionIdPresent: Boolean(session.jsessionId),
+          webduidPresent: Boolean(session.webduid),
+          recognizedSession: session.recognizedSession,
+          accountIdPresent: Boolean(session.accountId),
+          onlineIdPresent: Boolean(session.onlineId),
+          profileOk,
+          entitlementsOk,
+          entitlementCount,
+          error: sessionError,
+        };
+      } catch (error) {
+        sessionSummary = {
+          status: 'session-error',
+          jsessionIdPresent: false,
+          webduidPresent: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
       }
     } catch (error) {
       tokenResult = {
@@ -650,8 +693,8 @@ async function cmdStatus(parsed: ParsedArgs) {
       tokenError: tokenResult.error ?? null,
     },
     geo: geoResult,
-    session: {
-      status: sessionProbe.status,
+    session: sessionSummary,
+    localAppCookies: {
       jsessionIdPresent: Boolean(cookies.qtWebEngine.jsessionId),
       webduidPresent: Boolean(cookies.qtWebEngine.webduid),
     },
@@ -677,6 +720,14 @@ async function cmdStatus(parsed: ParsedArgs) {
   console.log(`Kamaji session     : ${summary.session.status}`);
   console.log(`  JSESSIONID       : ${summary.session.jsessionIdPresent ? 'present' : 'absent'}`);
   console.log(`  WEBDUID          : ${summary.session.webduidPresent ? 'present' : 'absent'}`);
+  if (summary.session.accountIdPresent !== undefined) {
+    console.log(`  Account linked   : ${summary.session.accountIdPresent}`);
+    console.log(`  Online ID        : ${summary.session.onlineIdPresent}`);
+    console.log(`  Profile ok       : ${summary.session.profileOk}`);
+    console.log(`  Entitlements ok  : ${summary.session.entitlementsOk}${summary.session.entitlementCount != null ? ` (${summary.session.entitlementCount})` : ''}`);
+    console.log(`  recognizedSession: ${summary.session.recognizedSession}`);
+  }
+  console.log(`Local app cookies  : JSESSIONID=${summary.localAppCookies.jsessionIdPresent} WEBDUID=${summary.localAppCookies.webduidPresent}`);
   console.log(`Broker reachable   : ${summary.broker.reachable}${summary.broker.error ? ` (${summary.broker.error})` : ''}`);
   console.log('');
 
@@ -684,11 +735,10 @@ async function cmdStatus(parsed: ParsedArgs) {
     console.log('→ NPSSO missing or expired. Acquire it via the official web login flow:');
     console.log('→   npm run auth:psn-headed');
     console.log('→   npm run auth:extract-npsso');
-  } else if (summary.session.status === 'session-expired') {
-    console.log('→ Kamaji session expired. Launch the PS Plus app to re-establish.');
-    console.log('→ Once running, re-run this command to confirm session-active.');
   } else if (summary.session.status === 'session-active') {
     console.log('→ Full Kamaji API access available. Run api:psn-direct -- token to export bearer.');
+  } else if (summary.session.status === 'session-partial' || summary.session.status === 'session-error') {
+    console.log(`→ Auth succeeded but session validation was incomplete${summary.session.error ? ` (${summary.session.error})` : ''}.`);
   }
 }
 
