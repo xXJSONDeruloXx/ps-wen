@@ -86,6 +86,8 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
   - `GET /store/api/pcnow/00_09_000/container/US/en/19/STORE-MSF192018-APOLLOROOT`
   - full browseable category tree confirmed (Must Play, Action, Sports, Adventure, Shooter, Racing, RPG, Puzzle, Kids & Family, Fighting, Simulation, Strategy, Remasters, PSP/PS1/PS2, PS3, alphabetical ranges)
   - `STORE-MSF192018-PLUSDEALS` returned live counts: 497 games, 113 bundles, 72 add-ons, 1 avatar
+  - real product inventory extracted from category containers (e.g. Days Gone, God of War, Assassin's Creed Odyssey, Marvel's Guardians of the Galaxy, Far Cry 6, Heavenly Sword, Ratchet & Clank remasters, The Last of Us Remastered, LEGO Batman 3, My Friend Peppa Pig)
+  - title/content IDs confirmed in live responses (`UPxxxx-CUSA...`, `UP9000-NPUA...`)
 - **Done**: `auth:intercept-session` Playwright interceptor script
   - broader intercept confirmed full GrandCentral startup sequence including Akamai sensor POSTs to `/ELdff8h5I1y7/...`, manifest fetch, OAuth GET, and session POST to `/user/session`
   - recognition blocker identified: cross-domain `ca.account.sony.com/ELdff8h5I1y7/...` load returns 403 in plain browser context; native Electron WebView likely required

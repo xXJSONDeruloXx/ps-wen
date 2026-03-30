@@ -55,6 +55,9 @@ npm run api:psn-direct -- stores                  # live store/catalog/PS-Plus U
 npm run api:psn-direct -- manifest                # live exp-manifest fetch (env URLs, deep-link category IDs)
 npm run api:psn-direct -- catalog --size 20       # browse a store container (default: APOLLOROOT)
 npm run api:psn-direct -- catalog --cat STORE-MSF192018-APOLLOMUSTPLAY --size 10
+  # examples now confirmed: Days Gone, God of War, Assassin's Creed Odyssey
+npm run api:psn-direct -- catalog --cat STORE-MSF192018-APOLLO_ACTION --size 10
+  # examples now confirmed: Guardians of the Galaxy, Far Cry 6, Deus Ex, Killing Floor 2
 npm run api:psn-direct -- session-probe           # Kamaji session health with actionable guidance
 npm run api:psn-direct -- broker                  # localhost:1235 broker reachability + command list
 npm run api:psn-direct -- <cmd> --json            # machine-readable output for any command
