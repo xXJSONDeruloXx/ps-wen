@@ -263,7 +263,7 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
     redirectUri: seed.appUrl + 'grc-response.html',
     killApp: function (appId, cb) {
       record('core.killApp', { appId: appId });
-      cb({ result: true });
+      if (cb) cb({ result: true });
     },
     readRegistry: function (key) {
       record('core.readRegistry', { key: key });
@@ -271,11 +271,21 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
       if (key === 'np_env') return 'e1-np';
       return null;
     },
-    getAuthCode: function (clientId, localURI, redirectURI, cb) {
-      var authCode = redirectURI.indexOf('versa:user_update_entitlements_first_play') !== -1 ? seed.cloudAuthCode : seed.ps3AuthCode;
+    getAuthCode: function () {
+      var args = Array.prototype.slice.call(arguments);
+      var clientId = args[0];
+      var maybeMode = args[1];
+      var maybeRedirect = args[2];
+      var maybeCb = args[3];
+      var authCode;
+      if (maybeMode === 'streamServer') authCode = seed.streamServerAuthCode || ('mock-stream-' + String(clientId).slice(0, 6));
+      else if (maybeMode === 'ps3') authCode = seed.ps3AuthCode;
+      else if (typeof maybeRedirect === 'string' && maybeRedirect.indexOf('versa:user_update_entitlements_first_play') !== -1) authCode = seed.cloudAuthCode;
+      else if (maybeMode === 'gkCloud') authCode = seed.cloudAuthCode;
+      else authCode = seed.ps3AuthCode || seed.cloudAuthCode || ('mock-' + String(clientId).slice(0, 6));
       var result = { auth_code: authCode || ('mock-' + String(clientId).slice(0, 6)) };
-      record('core.getAuthCode', { clientId: clientId, localURI: localURI, redirectURI: redirectURI, result: result });
-      cb(result);
+      record('core.getAuthCode', { args: args, result: result });
+      if (typeof maybeCb === 'function') maybeCb(result);
       return Promise.resolve(result);
     },
     launchApp: function (name) {
@@ -288,10 +298,168 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
     }
   };
 
-  var plugin = new BrokerBridgePlugin();
+  function createBridgePlugin(label, options) {
+    options = options || {};
+    function BridgePlugin() {
+      this.ws = null;
+      this.wsReady = null;
+      this.eventHandler = null;
+      this.errorHandler = null;
+      this.queuedEvents = [];
+      this.callbackEvent = null;
+      this.callbackError = null;
+    }
+    BridgePlugin.prototype.ensureWs = function () {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
+      if (this.wsReady) return this.wsReady;
+      var self = this;
+      this.wsReady = new Promise(function (resolve, reject) {
+        var ws = new WebSocket(seed.brokerUrl);
+        self.ws = ws;
+        ws.addEventListener('open', function () {
+          record(label + '.ws.open', { url: seed.brokerUrl });
+          resolve();
+        }, { once: true });
+        ws.addEventListener('error', function () {
+          record(label + '.ws.error', { url: seed.brokerUrl });
+          reject(new Error('WebSocket error'));
+        }, { once: true });
+        ws.addEventListener('message', function (event) {
+          var text = typeof event.data === 'string' ? event.data : String(event.data);
+          record(label + '.ws.in', text);
+          var parsed = null;
+          try { parsed = JSON.parse(text); } catch { parsed = null; }
+          if (!parsed || typeof parsed !== 'object') return;
+          if (typeof parsed.name === 'string') {
+            self.dispatchEventFromBroker(parsed.name, parsed.code, parsed.payload);
+          }
+        });
+      }).finally(function () {
+        self.wsReady = null;
+      });
+      return this.wsReady;
+    };
+    BridgePlugin.prototype.flushQueuedEvents = BrokerBridgePlugin.prototype.flushQueuedEvents;
+    BridgePlugin.prototype.send = function (command, params) {
+      var self = this;
+      return BrokerBridgePlugin.prototype.send.call(this, command, params).then(function () { return self; });
+    };
+    BridgePlugin.prototype.setEventHandler = function (cb) {
+      record(label + '.setEventHandler', {});
+      this.eventHandler = cb;
+      this.flushQueuedEvents();
+    };
+    BridgePlugin.prototype.setErrorHandler = function (cb) {
+      record(label + '.setErrorHandler', {});
+      this.errorHandler = cb;
+    };
+    BridgePlugin.prototype.setCallbacks = function (eventCb, errorCb) {
+      record(label + '.setCallbacks', {});
+      this.callbackEvent = eventCb;
+      this.callbackError = errorCb;
+    };
+    BridgePlugin.prototype.ready = function () {
+      record(label + '.ready', {});
+    };
+    BridgePlugin.prototype.dispatchEventFromBroker = function (name, code, payload) {
+      var translatedName = name;
+      if (translatedName === 'GOT_CLIENT_ID') translatedName = pluginEventMap.GOT_CLIENT_ID;
+      if (translatedName === 'PROCESS_END') translatedName = pluginEventMap.PROCESS_END;
+      var resultText = JSON.stringify(payload || {});
+      if (this.eventHandler) this.eventHandler({ name: translatedName, code: code, result: resultText });
+      if (this.callbackEvent) this.callbackEvent({ name: translatedName, code: code, result: resultText });
+    };
+    BridgePlugin.prototype.getStatus = function (cb) {
+      var status = { userId: 'pswen-user', entitlementId: seed.entitlementId, status: 'Idle' };
+      record(label + '.getStatus', status);
+      cb(status);
+    };
+    BridgePlugin.prototype.reset = function (cb) {
+      record(label + '.reset', {});
+      if (cb) cb({ result: true });
+      return Promise.resolve({ result: true });
+    };
+    BridgePlugin.prototype.setSettings = function (payload, cb) {
+      var normalized = payload;
+      if (typeof payload === 'string') {
+        try { normalized = JSON.parse(payload); } catch { normalized = { raw: payload }; }
+      }
+      record(label + '.setSettings', normalized);
+      var p = this.send('setSettings', normalized).then(function () { return { result: true }; });
+      if (cb) cb({ result: true });
+      return p;
+    };
+    BridgePlugin.prototype.requestClientId = function () {
+      var self = this;
+      record(label + '.requestClientId', {});
+      return this.send('requestClientId', {}).then(function () { return self; });
+    };
+    BridgePlugin.prototype.setTitleInfo = function (payload, cb) {
+      record(label + '.setTitleInfo', payload);
+      var p = this.send('setTitleInfo', payload).then(function () { return { result: true }; });
+      if (cb) cb({ result: true });
+      return p;
+    };
+    BridgePlugin.prototype.setAuthCodes = function (a, b, c, d) {
+      var callback = typeof c === 'function' ? c : typeof d === 'function' ? d : null;
+      var payload = { gkCloudAuthCode: a, gkPs3AuthCode: b };
+      if (typeof c !== 'function' && c !== undefined) payload.streamServerAuthCode = c;
+      record(label + '.setAuthCodes', payload);
+      var p = this.send('setAuthCodes', payload).then(function () { return { result: true }; });
+      if (callback) callback({ result: true });
+      return p;
+    };
+    BridgePlugin.prototype.requestGame = function (forceLogout, cb) {
+      var payload = typeof forceLogout === 'boolean' ? { forceLogout: forceLogout } : forceLogout;
+      record(label + '.requestGame', payload);
+      var p = this.send('requestGame', payload).then(function () { return { result: true }; });
+      if (cb) cb({ result: true });
+      return p;
+    };
+    BridgePlugin.prototype.cancelRequestGame = function (cb) {
+      record(label + '.cancelRequestGame', {});
+      if (cb) cb({ result: true });
+      return Promise.resolve({ result: true });
+    };
+    BridgePlugin.prototype.leaveLine = function (cb) {
+      record(label + '.leaveLine', {});
+      if (cb) cb({ result: true });
+      return Promise.resolve({ result: true });
+    };
+    BridgePlugin.prototype.testConnection = function () {
+      record(label + '.testConnection', {});
+      return this.send('testConnection', {}).then(function () { return { result: true }; });
+    };
+    BridgePlugin.prototype.startGame = function () {
+      record(label + '.startGame', {});
+      return this.send('startGame', {}).then(function () { return { result: true }; });
+    };
+    BridgePlugin.prototype.stopGame = function () {
+      record(label + '.stopGame', {});
+      return Promise.resolve({ result: true });
+    };
+    BridgePlugin.prototype.isStreaming = function () {
+      record(label + '.isStreaming', {});
+      return false;
+    };
+    BridgePlugin.prototype.isQueued = function () {
+      record(label + '.isQueued', {});
+      return false;
+    };
+    BridgePlugin.prototype.routeInputToPlayer = function () { record(label + '.routeInputToPlayer', {}); };
+    BridgePlugin.prototype.routeInputToClient = function () { record(label + '.routeInputToClient', {}); };
+    BridgePlugin.prototype.sendXmbCommand = function (a, b) { record(label + '.sendXmbCommand', { a: a, b: b }); };
+    BridgePlugin.prototype.saveDataDeepLink = function (payload) { record(label + '.saveDataDeepLink', payload); };
+    BridgePlugin.prototype.rawDataDeepLink = function (a, b) { record(label + '.rawDataDeepLink', { a: a, b: b }); };
+    BridgePlugin.prototype.invitationDeepLink = function (payload) { record(label + '.invitationDeepLink', payload); };
+    BridgePlugin.prototype.gameAlertDeepLink = function (payload) { record(label + '.gameAlertDeepLink', payload); };
+    return new BridgePlugin();
+  }
+
+  var browserPlugin = new BrokerBridgePlugin();
   var cloudPlayer = new CloudPlayer({
     platform: 'browser',
-    plugin: plugin,
+    plugin: browserPlugin,
     core: bridgeCore,
     cloudEndpoint: 'prod'
   });
@@ -308,6 +476,29 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
       record('platformAPI.getPluginStatus', status);
       return Promise.resolve(status);
     };
+  }
+
+  var pcPlugin = createBridgePlugin('pcPlugin');
+  var pcCloudPlayer = new CloudPlayer({
+    platform: 'pc',
+    plugin: pcPlugin,
+    core: bridgeCore,
+    cloudEndpoint: 'prod'
+  });
+  if (pcCloudPlayer.platformAPI) {
+    pcCloudPlayer.platformAPI.getUserInfo = function () {
+      var result = { info: { login: 'MetalCrabDip', user_id: '7380464838673082724' } };
+      record('pc.platformAPI.getUserInfo', result);
+      return Promise.resolve(result);
+    };
+    pcCloudPlayer.platformAPI.getPluginStatus = function () {
+      var status = { userId: 'pswen-user', entitlementId: seed.entitlementId, status: 'Idle' };
+      this.pluginUserId = status.userId;
+      this.pluginEntitlement = status.entitlementId;
+      record('pc.platformAPI.getPluginStatus', status);
+      return Promise.resolve(status);
+    };
+    pcCloudPlayer.platformAPI.setPluginEventHandler = function () {};
   }
 
   var requestedGame = {
@@ -338,13 +529,21 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
   };
 
   var scenarios = [];
-  scenarios.push(await withTimeout('platformAPI.testConnection', function () {
+  scenarios.push(await withTimeout('browser.platformAPI.testConnection', function () {
     var maybePromise = cloudPlayer.platformAPI && cloudPlayer.platformAPI.testConnection ? cloudPlayer.platformAPI.testConnection() : null;
     return new Promise(function (resolve) { setTimeout(function () { resolve(maybePromise == null ? null : maybePromise); }, 1000); });
   }));
-  scenarios.push(await withTimeout('cloudPlayer.launchGame', function () {
+  scenarios.push(await withTimeout('browser.cloudPlayer.launchGame', function () {
     return cloudPlayer.launchGame(requestedGame);
   }));
+  await new Promise(function (resolve) { setTimeout(resolve, 1200); });
+  scenarios.push(await withTimeout('pc.platformAPI.testConnection', function () {
+    var maybePromise = pcCloudPlayer.platformAPI && pcCloudPlayer.platformAPI.testConnection ? pcCloudPlayer.platformAPI.testConnection() : null;
+    return new Promise(function (resolve) { setTimeout(function () { resolve(maybePromise == null ? null : maybePromise); }, 1000); });
+  }));
+  scenarios.push(await withTimeout('pc.cloudPlayer.launchGame', function () {
+    return pcCloudPlayer.launchGame(requestedGame);
+  }, 12000));
   record('pluginEventMap.sample', {
     GOT_CLIENT_ID: pluginEventMap.GOT_CLIENT_ID,
     PROCESS_END: pluginEventMap.PROCESS_END

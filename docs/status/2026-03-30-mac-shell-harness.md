@@ -6,6 +6,11 @@ On macOS, without the official Windows app installed, we were still able to run
 Sony's real `psnow.playstation.com/app/...` bundle under Playwright and drive its
 own cloud-player launch logic against a local broker emulator.
 
+This now covers **two** real bundle paths:
+
+- the in-page **BrowserAPI** path
+- the require-able **PCClientAPI** path (`apollo/bridge/cloud-player/api/pc`)
+
 This does **not** start a real stream or render frames, but it does prove that we
 can execute and observe a meaningful part of Sony's real launch orchestration on
 this machine.
@@ -41,13 +46,16 @@ Instead, it used the real in-page Sony bundle modules:
 
 - `apollo/bridge/cloud-player/cloudPlayer`
 - `apollo/bridge/cloud-player/events/pluginEventMap`
+- the require-able PC module `apollo/bridge/cloud-player/api/pc`
 
 with a broker-bridged plugin shim and minimal core shim.
 
-That means the sequence below reflects the real `BrowserAPI` path inside Sony's
-current public app bundle.
+That means the captured sequences below reflect real Sony bundle logic, not a
+repo-invented fake call order.
 
-## Verified sequence captured on macOS
+## Verified sequences captured on macOS
+
+### BrowserAPI path
 
 The harness successfully exercised these broker/plugin-stage calls in order:
 
@@ -68,6 +76,28 @@ Observed outbound WebSocket envelopes in `shell-harness-report.json`:
 {"command":"setAuthCodes","params":{"gkCloudAuthCode":"bMoIAu","gkPs3AuthCode":"FVCR7y"}}
 {"command":"requestGame","params":{"forceLogout":false}}
 ```
+
+### PCClientAPI path
+
+The same harness can now also instantiate the require-able PC module and drive a
+PC-native sequence on macOS.
+
+Observed PC-side command flow included:
+
+1. `setSettings` (PC/WINDOWS settings, no entitlement during `testConnection` mode)
+2. `requestClientId`
+3. `setSettings` again with staged auth codes during `testConnection`
+4. `testConnection`
+5. `setSettings` (PC/WINDOWS settings for launch mode)
+6. `requestClientId`
+7. `setSettings` again with staged auth codes, `streamServerAuthCode`, `apolloSessionId`, and `entitlementID`
+8. `requestGame`
+
+So the PC path materially differs from BrowserAPI in two major ways:
+
+- it uses **`WINDOWS` / `PC`** settings values
+- it appears to fold auth staging back into **`setSettings`**, not a standalone
+  broker `setAuthCodes` command
 
 ## Important details learned
 
@@ -118,7 +148,31 @@ Observed browser-path payload:
 
 No `streamServerAuthCode` appeared in this browser-path harness.
 
-### 5. Browser-path `requestGame` currently reduces to `forceLogout`
+### 5. PCClientAPI path requests a third auth code: `streamServerAuthCode`
+
+The PC harness directly exercised:
+
+- `getCloudAuthCode()`
+- `getPS3AuthCode()`
+- `getStreamServerAuthCode()`
+
+and then observed the PC path push those values back into a later
+`setSettings` payload.
+
+In the mock harness this appeared as nested auth-code objects such as:
+
+```json
+{
+  "gkCloudAuthCode": { "auth_code": "bMoIAu" },
+  "gkPs3AuthCode": { "auth_code": "FVCR7y" },
+  "streamServerAuthCode": { "auth_code": "mock-stream-..." }
+}
+```
+
+That is the clearest app-free confirmation so far that the PC-native path really
+wants a third stream-server auth stage.
+
+### 6. Browser-path `requestGame` currently reduces to `forceLogout`
 
 Observed broker payload:
 
@@ -128,17 +182,37 @@ Observed broker payload:
 }
 ```
 
-### 6. Browser-path `setSettings` still looks console/browser-oriented
+### 7. Browser-path and PC-path `setSettings` are clearly different
 
-The observed `setSettings` payload from this harness used:
+The observed **browser** `setSettings` payload used:
 
 - `model: "orbis"`
 - `platform: "orbis"`
 
-not the PC-native values (`WINDOWS`, `PC`) seen in the PC-client code path.
+The observed **PC** `setSettings` payload used:
 
-That is a key limitation of this harness: it is currently exercising Sony's
-**browser API path**, not the full **PCClientAPI** path.
+- `model: "WINDOWS"`
+- `platform: "PC"`
+
+So the harness now directly confirms that Sony's bundle really carries two
+meaningfully different launch contracts, not just one path with cosmetic naming.
+
+### 8. `requestGame` evidence still needs careful wording
+
+The PC path calls `plugin.requestGame(n)` where `n` is a boolean derived from
+`forceLogout`.
+
+Our bridge currently serializes that as:
+
+```json
+{ "forceLogout": false }
+```
+
+for broker logging convenience.
+
+So this harness **does prove** that the PC bundle reduces the call to a boolean
+at the plugin boundary, but it does **not yet prove** that the real localhost
+broker wire format uses an object rather than a raw boolean.
 
 ## What this proves
 
@@ -164,29 +238,33 @@ This harness does **not** prove:
 
 ## Remaining gap
 
-The biggest remaining difference is:
+The biggest remaining difference is now narrower than before.
 
-- this harness currently exercises the **BrowserAPI** path
-- the Windows app's full launch path still requires the **PCClientAPI** path
+The harness can exercise:
+
+- **BrowserAPI** path end-to-end through `requestGame`
+- **PCClientAPI** path through repeated `setSettings`, `requestClientId`,
+  `getStreamServerAuthCode()`, and `requestGame`
 
 The missing Windows-native pieces remain:
 
-- `streamServerClientId`
-- `getStreamServerAuthCode()`
-- `startGame()` on the PC-native contract
+- a real `streamServerClientId` from the official runtime rather than our mock
+- confirmation of the real wire format around PC `requestGame`
+- `startGame()` / `showPlayer()` behavior on the true PC-native runtime
 - any true player/media runtime behavior
 
 ## Best next step
 
 Use the same harness idea to push closer to the PC-native path:
 
-1. determine whether the public bundle exposes a require-able PC-client API module
-2. instantiate or patch that path directly in-page if possible
-3. extend the bridge plugin for any extra PC-native methods
-4. capture whether the PC path adds:
-   - `streamServerAuthCode`
-   - `startGame`
-   - different `setSettings` values (`WINDOWS` / `PC`)
+1. tighten the PC harness around the remaining native-only edge cases:
+   - whether `requestGame` is really raw boolean on the broker wire
+   - whether `startGame()` can be driven after a suitable synthetic event
+2. add explicit logging/serialization of the pre-broker plugin-call arguments so
+   wire-format derivations are separated from actual observed broker frames
+3. capture whether additional PC runtime events are needed after `requestGame`
+   before `startGame()` becomes meaningful
+4. if a Windows runtime becomes available later, compare the real PC broker
+   replies against these Mac-side PCClientAPI traces
 
-Even if that still falls short of real streaming, it would narrow the remaining
-native-only gap substantially.
+Even without Windows, this already narrows the native-only gap substantially.

@@ -70,7 +70,9 @@ npm run broker:emulator                          # local mock broker on ws://loc
 npm run broker:emulator -- --out artifacts/broker/mock-broker-session.jsonl
   # logs all frames and emits mocked replies for testConnection/requestClientId/setSettings/setAuthCodes/requestGame/startGame
 npm run broker:shell-harness -- --headless true  # run Sony's real psnow app bundle on macOS against the local broker emulator
-  # captures the BrowserAPI launch sequence: testConnection -> setSettings -> requestClientId -> setTitleInfo -> setAuthCodes -> requestGame
+  # captures both BrowserAPI and require-able PCClientAPI launch behavior from the real bundle
+  # BrowserAPI: testConnection -> setSettings -> requestClientId -> setTitleInfo -> setAuthCodes -> requestGame
+  # PCClientAPI: setSettings -> requestClientId -> getStreamServerAuthCode() -> setSettings(with codes) -> requestGame
 npm run api:psn-direct -- gaikai id               # mint Gaikai apolloId / clientSessionId
 npm run api:psn-direct -- gaikai config           # fetch + decode config.cc.prod.gaikai.com/v1/config
 npm run api:psn-direct -- gaikai auth-code --kind cloud
