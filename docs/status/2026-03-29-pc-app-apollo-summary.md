@@ -66,7 +66,7 @@ Interpretation:
   - Kamaji-backed app-specific endpoints
   - generic account APIs
   - list/banner/store-related APIs
-- this gives us a more credible clean-room split between:
+- this gives us a more credible  split between:
   - **identity/account/profile APIs**
   - **PS Now / PC Now / Kamaji app APIs**
 

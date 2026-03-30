@@ -2,7 +2,7 @@
 
 ## Goal
 
-Figure out what is publicly confirmable about modern PlayStation cloud streaming, reduce the unknowns that block an open-source thin client, and document a clean-room implementation path.
+Figure out how PlayStation Plus cloud streaming works — auth, session orchestration, transport, and device support — and build an open-source thin client against it.
 
 ## Primary questions
 
@@ -16,7 +16,7 @@ Figure out what is publicly confirmable about modern PlayStation cloud streaming
 - **Tier 1 — official/public**: PlayStation support pages, system software notes, official product pages.
 - **Tier 2 — user-provided / community**: preliminary research dossier, app store claims, community posts, repo archaeology.
 - **Tier 3 — local measurements**: artifacts gathered through this repo's scripts while exercising official surfaces on your own account/device.
-- **Tier 4 — implementation hypotheses**: clean-room architecture and planned work based on Tier 1–3 evidence.
+- **Tier 4 — implementation hypotheses**: architecture and planned work based on Tier 1–3 evidence.
 
 ## Near-term outputs
 
@@ -30,5 +30,5 @@ Figure out what is publicly confirmable about modern PlayStation cloud streaming
 - public claims are normalized into machine-readable artifacts
 - experiments are tracked with explicit blockers and exit criteria
 - official-login automation is possible without hardcoding secrets into the repo
-- static and network instrumentation paths exist for sanctioned follow-up testing
+- static and network instrumentation paths exist for follow-up testing
 - the implementation roadmap clearly separates generic OSS work from Sony-specific unknowns

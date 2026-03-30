@@ -1,34 +1,29 @@
 # ps-wen
 
-Research repo for assessing the current state of PlayStation cloud streaming and mapping a clean-room path toward an open-source thin client.
+Research repo for mapping the PlayStation Plus PC app, its control plane, native broker, and streaming transport surface toward an open-source thin-client implementation.
 
 ## Scope
 
 This repo is for:
-- validating publicly documented PlayStation cloud streaming capabilities
-- organizing unknowns around auth, session orchestration, transport, and device support
-- building safe research harnesses for public-page collection, official sign-in testing, static client bundle inventory, and local traffic metadata capture
-- documenting an implementation path for a generic low-latency streaming client that can stay clean-room and modular
-
-This repo is **not** for:
-- bypassing DRM, trust checks, certificate pinning, or access controls
-- credential harvesting or unofficial password collection outside official Sony login surfaces
-- redistributing Sony assets or proprietary binaries
+- mapping the PlayStation Plus PC app runtime, native broker, auth surface, and network behavior
+- inventorying public JS assets, static bundles, and locally observed network metadata
+- building tooling and an observation-backed prototype toward an OSS thin-client implementation
+- documenting the streaming control-plane and transport surface as discovered through direct observation
 
 ## Current workstreams
 
-1. **Evidence collection**: turn preliminary research into structured markdown and reproducible artifact capture.
-2. **Capability validation**: collect official public claims, then verify what can be confirmed with official login flows and first-party surfaces.
-3. **Client archaeology**: inventory official PC app bundles when provided locally.
-4. **Implementation planning**: define a reusable media/input/control-plane architecture for a non-wrapper open-source client.
+1. **Evidence collection**: direct observation of installed app, network captures, auth surfaces, and public assets.
+2. **Capability mapping**: confirm what the running client actually does on the wire during launch, stream, save, overlay, and quit flows.
+3. **Client archaeology**: inventory official PC app bundles and public JS assets.
+4. **Implementation**: build an OSS prototype against the observed surface.
 
 ## Repo layout
 
 - `docs/` — organized research, architecture notes, experiment plans, status logs, and the living implementation roadmap (`docs/implementation/roadmap.md`)
-- `src/` — machine-readable observations and clean-room provider contracts
+- `src/` — machine-readable observations and provider contracts
 - `scripts/public/` — public-source collection and normalization
 - `scripts/static/` — static inspection helpers for local official client artifacts
-- `scripts/network/` — local metadata capture helpers for sanctioned experiments on your own device/account
+- `scripts/network/` — local metadata capture helpers for experiments on your device
 - `tests/` — Playwright smoke tests and unit tests
 - `artifacts/` — generated outputs kept local and ignored by git
 
@@ -44,7 +39,7 @@ npm run research:public
 npm run test:public
 ```
 
-To use PSN credentials for official-login experiments, place them in `.env` after reviewing `docs/implementation/compliance-guardrails.md`.
+To use PSN credentials, place them in `.env` using `.env.example` as the template.
 
 ## Key commands
 
@@ -73,14 +68,14 @@ npm run inspect:installer -- ~/Downloads/PlayStationPlus-12.5.0.exe
 npm run inspect:pc-app         # summarize the installed Windows PlayStation Plus shell + broker surface
 npm run auth:pc-app-summary    # write a redacted PC-app auth/storage summary from local Windows artifacts
 npm run prototype:psplus -- status       # observation-backed MVP CLI for system-browser login, confirm-login flow state, bootstrap, entitlement, and placeholder allocation seams
-npm run capture:metadata       # macOS/Linux tcpdump wrapper for sanctioned traffic metadata capture
+npm run capture:metadata       # macOS/Linux tcpdump wrapper for traffic metadata capture
 npm run capture:metadata:windows # Windows pktmon-based metadata capture (run from elevated PowerShell; set CAPTURE_WINDOWS_PORTS=all for stream-phase captures)
 npm run summarize:metadata -- artifacts/network/<capture>.pcapng # uses tshark when available, otherwise falls back to the built-in DNS/TLS metadata summarizer
 ```
 
 ## Initial deliverables in this commit series
 
-- repo scaffold and guardrails
+- repo scaffold and notes
 - research dossier seeded from the preliminary report
 - test harnesses for public-source validation and official-login session capture
 - static + network instrumentation helpers for later phases
@@ -90,4 +85,4 @@ npm run summarize:metadata -- artifacts/network/<capture>.pcapng # uses tshark w
 - `.env` is ignored. Use `.env.example` as the template.
 - Generated captures, storage states, screenshots, and pcaps stay under `artifacts/` and are ignored.
 - For authenticated browser-session probes, prefer subset runs via `--ids` and keep several seconds between requests.
-- The implementation path documented here assumes clean-room interoperability research only.
+- The implementation path documented here targets a working OSS thin-client for PlayStation cloud streaming.

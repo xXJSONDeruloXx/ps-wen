@@ -25,7 +25,7 @@ It is an observation-backed MVP that turns the repo's current evidence into a us
 - entitlement placeholders
 - session-allocation placeholders
 
-The goal is to let clean-room implementation work start **before** a real Premium queue/start capture exists.
+The goal is to let  implementation work start **before** a real Premium queue/start capture exists.
 
 ## Added pieces
 
@@ -209,4 +209,4 @@ Build the next thin-client layer against this MVP instead of waiting for perfect
 - title/entitlement UI models
 - placeholder queue/launch UX
 
-That work is now possible without crossing any repo guardrails.
+That work is now possible without crossing any repo notes.

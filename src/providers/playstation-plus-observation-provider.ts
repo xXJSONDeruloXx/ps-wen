@@ -544,7 +544,7 @@ export class PlayStationPlusObservationProvider
             ...uniqueSorted(this.pcApolloSummary?.pcUserApiPaths ?? []),
             ...uniqueSorted(this.pcApolloSummary?.accountApiTemplates ?? [])
           ]),
-          notes: ['Current bootstrap is observation-backed and read-only; no proprietary session replay is attempted.']
+          notes: ['Current bootstrap is observation-backed and read-only; no session replay is attempted.']
         },
         entitlements: {
           state: entitlements.some((entry) => entry.state === 'gated') ? 'gated' : 'unknown',

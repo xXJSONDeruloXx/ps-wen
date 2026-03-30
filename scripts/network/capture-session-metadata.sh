@@ -24,8 +24,7 @@ echo "  duration : $DURATION seconds"
 echo "  filter   : $FILTER"
 echo "  output   : $OUT_FILE"
 echo
-echo "Use this while exercising an official client on your own account/device."
-echo "This script is for metadata capture only."
+echo "Use this while exercising the client on your device."
 echo
 
 CMD=(tcpdump -i "$INTERFACE" -w "$OUT_FILE" "$FILTER")

@@ -276,7 +276,7 @@ The Windows PC app surface is now much clearer:
 - native-client work should focus on:
   - the `psnow.playstation.com/app/...` frontend
   - localhost broker IPC (`1235`)
-  - sanctioned metadata capture during launch / queue / stream transitions
+  - metadata capture during launch / queue / stream transitions
 
 ### Ruled out
 

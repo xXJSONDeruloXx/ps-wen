@@ -19,5 +19,5 @@ npm run api:playstation-web-summary artifacts/api/playstation-web-low-touch-repo
 
 ## Why
 
-The goal of this repo is evidence collection and clean-room planning, not aggressive endpoint exercise.
+The goal of this repo is evidence collection and  planning, not aggressive endpoint exercise.
 Low-touch pacing reduces unnecessary account activity while still letting us validate specific browser-side hypotheses.

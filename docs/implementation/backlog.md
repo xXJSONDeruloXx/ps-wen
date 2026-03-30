@@ -53,7 +53,7 @@ See also: `docs/implementation/roadmap.md` for the living done/in-progress/next 
 2. Start a minimal thin-client telemetry schema.
 3. Build controller capability and session diagnostics matrices.
 4. Keep machine-readable observations in `src/observations/playstation-web.ts` and `src/observations/playstation-plus-pc.ts` aligned with new evidence.
-5. **Done**: extend the observation-backed provider prototype so more clean-room logic can develop against cached artifacts instead of live account traffic (`npm run prototype:psplus -- status|bootstrap|entitlements|allocate|login`).
+5. **Done**: extend the observation-backed provider prototype so more  logic can develop against cached artifacts instead of live account traffic (`npm run prototype:psplus -- status|bootstrap|entitlements|allocate|login`).
 6. **Done in part**: add a browser-login state machine / confirmation flow on top of the observation-backed PlayStation Plus prototype (`login`, `confirm-login`, `reset-flow`, persisted flow-state artifact).
 7. Build the next MVP layer on top of that flow: diagnostics, broker adapter seam, and placeholder queue/launch UX.
 8. Use the new segmented capture set to compare:

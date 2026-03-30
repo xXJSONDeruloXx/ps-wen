@@ -108,7 +108,7 @@ That means the observed resource URLs are valuable evidence, but they are **not*
 
 ## Why this matters for the implementation path
 
-Even though this repo is targeting a clean-room, non-wrapper path, these browser findings suggest a reusable separation of concerns:
+Even though this repo is targeting a , non-wrapper path, these browser findings suggest a reusable separation of concerns:
 
 1. **identity/bootstrap layer**
    - cookies, signed-in state, profile bootstrap, toolbar

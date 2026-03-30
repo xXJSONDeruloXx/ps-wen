@@ -478,7 +478,7 @@ export function summarizePlaystationWebControlPlane(input: {
             `If more GraphQL validation is needed, prioritize the small read-only bundle query set: ${unprobedReadOnly.join(', ')}.`
           ]
         : []),
-      'Use the observation-backed provider prototype to shape clean-room control-plane interfaces before any native-client work.'
+      'Use the observation-backed provider prototype to shape  control-plane interfaces before any native-client work.'
     ]
   };
 }

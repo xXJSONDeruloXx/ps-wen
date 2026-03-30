@@ -1,6 +1,6 @@
-# PlayStation Plus clean-room roadmap
+# PlayStation Plus  roadmap
 
-This is the living done/todo tracker for turning current evidence into a clean-room OSS thin-client MVP without overstating what has been proven.
+This is the living done/todo tracker for turning current evidence into a  OSS thin-client MVP without overstating what has been proven.
 
 ## Status legend
 
@@ -27,7 +27,7 @@ This is the living done/todo tracker for turning current evidence into a clean-r
 - **Done**: public PC-app bundles inventoried
   - `apollo.js`, `vendor.js`, `js_ex.min.js`
   - Kamaji / PC Now / account API hints extracted
-- **Done**: sanctioned Windows metadata captures performed
+- **Done**: Windows metadata captures performed
   - startup/control-plane captures
   - full stream-phase all-port capture
   - segmented launch/quit/save-action captures
@@ -106,7 +106,7 @@ These are the pieces that still prevent a full standalone replacement of the off
 
 ### Auth/session ownership
 
-- a sanctioned standalone native auth completion model
+- a standalone native auth completion model
 - confirmed post-browser callback/session ownership flow for a third-party app
 
 ### Entitlements
@@ -137,7 +137,7 @@ These are the pieces that still prevent a full standalone replacement of the off
 
 ## What the OSS MVP can honestly do now
 
-A clean-room MVP can already:
+A  MVP can already:
 
 - open official browser login
 - track login confirmation state

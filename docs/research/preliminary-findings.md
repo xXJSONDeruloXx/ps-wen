@@ -37,7 +37,7 @@ There is still no well-known, fully open-source, end-to-end client for current P
 
 ## Practical read on feasibility
 
-A clean-room open-source effort looks most feasible if it starts as a generic cloud-gaming thin client with:
+A  open-source effort looks most feasible if it starts as a generic cloud-gaming thin client with:
 - a modular auth/session layer
 - pluggable transport adapters
 - a strong low-latency media pipeline

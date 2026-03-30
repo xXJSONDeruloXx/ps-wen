@@ -35,8 +35,7 @@ Write-Host ('  ports    : {0}' -f $(if ($captureAllPorts) { 'all' } else { $port
 Write-Host ('  etl      : {0}' -f $etlPath)
 Write-Host ('  pcapng   : {0}' -f $pcapngPath)
 Write-Host
-Write-Host 'Use this while exercising an official client on your own account/device.'
-Write-Host 'This script is for metadata capture only.'
+Write-Host 'Use this while exercising the client on your device.'
 Write-Host
 
 $started = $false

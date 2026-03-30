@@ -23,7 +23,7 @@ npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-19453
 
 ## What changed
 
-Four sanctioned Windows `pktmon` captures were completed from an elevated PowerShell session and summarized locally.
+Four Windows `pktmon` captures were completed from an elevated PowerShell session and summarized locally.
 
 The repo now also has a built-in pcapng metadata summarizer, so capture summaries no longer hard-stop when `tshark` is missing.
 
@@ -53,7 +53,7 @@ Observed mapping in the local summary:
 
 - `psnow.playstation.com` -> `23.213.71.109`
 
-This is the first actual on-wire confirmation in this repo that the installed Windows client still reaches the `psnow.playstation.com` control surface during a sanctioned live capture window.
+This is the first actual on-wire confirmation in this repo that the installed Windows client still reaches the `psnow.playstation.com` control surface during a live capture window.
 
 ### What it did **not** show
 
@@ -122,7 +122,7 @@ The most important new clues are:
 - `cc.prod.gaikai.com`
   - gives a fresh local on-wire Gaikai-era hostname hit from the current Windows client
 - `web.np.playstation.com`
-  - confirms the browser/control-plane host seen in cached profile state also appears in sanctioned native-app metadata capture
+  - confirms the browser/control-plane host seen in cached profile state also appears in native-app metadata capture
 
 ### What this still does not prove
 
@@ -137,7 +137,7 @@ So the capture improves the control-plane map substantially, but it does not rep
 
 ## Capture 4: `ps-cloud-metadata-20260329-194536`
 
-This is the first sanctioned **all-port** Windows capture taken during a real stream-capable session after Premium was purchased and while the user actually:
+This is the first **all-port** Windows capture taken during a real stream-capable session after Premium was purchased and while the user actually:
 
 - re-entered the app
 - started a game
