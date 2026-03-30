@@ -10,11 +10,16 @@ $env:CAPTURE_DURATION='1200'
 $env:CAPTURE_FILE_SIZE_MB='1024'
 npm run capture:metadata:windows
 npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-171205.pcapng
+$env:CAPTURE_DURATION='420'
+$env:CAPTURE_FILE_SIZE_MB='2048'
+$env:CAPTURE_WINDOWS_PORTS='all'
+npm run capture:metadata:windows
+npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-194536.pcapng
 ```
 
 ## What changed
 
-Three sanctioned Windows `pktmon` captures were completed from an elevated PowerShell session and summarized locally.
+Four sanctioned Windows `pktmon` captures were completed from an elevated PowerShell session and summarized locally.
 
 The repo now also has a built-in pcapng metadata summarizer, so capture summaries no longer hard-stop when `tshark` is missing.
 
@@ -28,6 +33,8 @@ Local-only generated artifacts:
 - `artifacts/network/ps-cloud-metadata-20260329-165742.summary.json`
 - `artifacts/network/ps-cloud-metadata-20260329-171205.pcapng`
 - `artifacts/network/ps-cloud-metadata-20260329-171205.summary.json`
+- `artifacts/network/ps-cloud-metadata-20260329-194536.pcapng`
+- `artifacts/network/ps-cloud-metadata-20260329-194536.summary.json`
 
 ## Capture 1: `ps-cloud-metadata-20260329-164212`
 
@@ -124,28 +131,101 @@ Even with the wider capture window, this still does **not** prove a real entitle
 
 So the capture improves the control-plane map substantially, but it does not replace a real queue/start observation.
 
+## Capture 4: `ps-cloud-metadata-20260329-194536`
+
+This is the first sanctioned **all-port** Windows capture taken during a real stream-capable session after Premium was purchased and while the user actually:
+
+- re-entered the app
+- started a game
+- opened the stream overlay
+- toggled vibration
+- copied save data to online storage
+- deleted save data from online storage
+- quit the game from the overlay
+
+### New host families observed on the wire
+
+This run added first local hits for additional PlayStation/Gaikai families, including:
+
+- `accounts.api.playstation.com`
+- `client.cc.prod.gaikai.com`
+- `config.cc.prod.gaikai.com`
+- `vulcan.dl.playstation.net`
+
+It also re-confirmed:
+
+- `psnow.playstation.com`
+- `commerce.api.np.km.playstation.net`
+- `cc.prod.gaikai.com`
+- `web.np.playstation.com`
+- `ca.account.sony.com`
+- `download-psnow.playstation.com`
+- `theia.dl.playstation.net`
+
+### Strongest new transport clue
+
+The updated built-in summarizer now surfaces high-volume non-standard transport candidates. This run showed:
+
+- `UDP 104.142.165.13:2053`
+  - `bytesOut=1459790`
+  - `bytesIn=383127222`
+  - `packetsOut=20043`
+  - `packetsIn=501144`
+- `UDP 104.142.165.134:2053`
+  - `bytesOut=629706`
+  - `bytesIn=9504176`
+  - `packetsOut=526`
+  - `packetsIn=6562`
+
+Those are the first repo-local observations that look like actual **live stream transport**, not just HTTPS control plane.
+
+### Ownership clue for the UDP transport block
+
+A manual RDAP lookup for `104.142.165.13` placed it inside:
+
+- `104.142.128.0/17`
+- network name: `SBS-V4-3`
+- registrant: `Sony Interactive Entertainment LLC`
+
+Interpretation:
+
+- the large UDP/2053 traffic is not random CDN noise
+- it is consistent with a Sony-owned streaming/media transport path
+
+### What this means
+
+This is the strongest evidence so far that the modern PC client still uses a **Gaikai/PS Now-descended control plane plus a custom UDP streaming path**.
+
+It does **not** yet fully answer:
+
+- exact session-allocation request/response shapes
+- exact mapping between `client.cc` / `config.cc` / UDP endpoints
+- whether the UDP channel multiplexes media/control/input or separates them further
+- codec/framing/encryption details
+
+But it moves the project from "transport unknown" to "custom UDP strongly indicated by live stream-phase capture."
+
 ## Net result
 
-We now have a better-grounded model:
+We now have a much better-grounded model:
 
 1. **Static/runtime evidence** says the app launches an Electron shell on `https://psnow.playstation.com/app/...`.
 2. **Public JS assets** still expose Kamaji / PC Now / account API structure.
-3. **Live metadata capture** now confirms on-wire activity for `psnow.playstation.com` plus additional Sony/PlayStation control-plane families such as `ca.account.sony.com`, `commerce.api.np.km.playstation.net`, `web.np.playstation.com`, `download-psnow.playstation.com`, `theia.dl.playstation.net`, and `cc.prod.gaikai.com`.
+3. **Live metadata capture** confirms on-wire activity for `psnow.playstation.com`, `accounts.api.playstation.com`, `commerce.api.np.km.playstation.net`, `client.cc.prod.gaikai.com`, `config.cc.prod.gaikai.com`, `web.np.playstation.com`, `download-psnow.playstation.com`, `theia.dl.playstation.net`, and `vulcan.dl.playstation.net`.
+4. **A real stream-phase all-port capture** now shows large non-443 UDP traffic to Sony-owned `104.142.128.0/17` endpoints on port `2053`.
 
-That materially strengthens the claim that the installed PC client is still anchored to the PS Now / Kamaji / Gaikai-era control-plane family.
+That materially strengthens the claim that the installed PC client is still anchored to the PS Now / Kamaji / Gaikai-era control-plane family and likely uses a custom UDP transport during live streaming.
 
 ## Best next capture
 
-To get from "startup/control-surface confirmed" to "queue/allocator/transport mapped," the next capture should be cleaner:
+The next highest-value follow-up is no longer a generic startup capture. It is a **shorter segmented all-port capture** that isolates one stream lifecycle edge at a time:
 
-1. close the PlayStation Plus app completely
-2. close or reduce unrelated noisy apps if possible
-3. start `npm run capture:metadata:windows` from elevated PowerShell
-4. relaunch the PlayStation Plus app normally
-5. if available, proceed far enough to hit:
-   - login completion
-   - queue placement
-   - stream start / launch attempt
-6. summarize again with `npm run summarize:metadata -- artifacts/network/<capture>.pcapng`
+1. start capture just before game launch
+2. stop soon after picture appears
+3. repeat separately for:
+   - opening overlay
+   - save sync actions
+   - quit-game flow
+4. compare host/port deltas across the shorter captures
 
-The highest-value missing evidence is still a real queue/start path, not another idle-only capture.
+That should help separate allocator/bootstrap traffic from the long-lived media transport channel.

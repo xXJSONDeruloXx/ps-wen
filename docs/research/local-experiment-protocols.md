@@ -80,6 +80,7 @@ Steps:
 2. start capture:
    - macOS/Linux: `CAPTURE_INTERFACE=en0 npm run capture:metadata`
    - Windows (elevated PowerShell required): `npm run capture:metadata:windows`
+   - for stream-phase Windows captures, prefer `CAPTURE_WINDOWS_PORTS=all` so non-443 UDP/TCP transport does not get filtered out
 3. exercise the official client during the capture window
 4. summarize with `npm run summarize:metadata -- artifacts/network/<file>.pcap` or `.pcapng` (`tshark` if present, otherwise the repo's built-in DNS/TLS metadata summarizer)
 5. document observations at the metadata level only

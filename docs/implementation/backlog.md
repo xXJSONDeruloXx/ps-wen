@@ -58,6 +58,6 @@ Prioritized next steps based on current evidence.
 
 ## Priority 5 — cloud-stream specific validation
 
-1. Validate actual cloud-streaming availability on owned/supported surfaces.
+1. **Done in part**: validate actual cloud-streaming availability on an owned/supported surface and capture a real stream-phase pktmon run.
 2. Record observed quality ladders, controller requirements, reconnect behavior, and error handling.
-3. Only then narrow transport and media-pipeline assumptions.
+3. Narrow transport/media assumptions further now that a live all-port capture has shown large UDP/2053 traffic inside a Sony-owned `104.142.128.0/17` block during streaming.
