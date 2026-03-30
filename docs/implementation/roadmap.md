@@ -156,9 +156,9 @@ This is the living done/todo tracker for turning current evidence into a  OSS th
 
 1. **Subscription endpoint discovery** — authenticated session is live, but `/user/subscription` returns 404. Probe sibling paths and inspect app traffic for the real subscription resource.
 
-2. **Allocator/session-start endpoint discovery** — with standalone auth now solved, focus on the request/response shape that turns entitlement + title selection into a real stream allocation.
+2. **Broker adapter seam (now highest value)** — the standalone probe now reaches Gaikai preflight (`cc.prod.gaikai.com/v1/apollo/id`, `client.cc.prod.gaikai.com/v1/events`, `client.cc.prod.gaikai.com/v1/logs`) and can mint `gaikai://local` auth codes, but the final launch path is still native-plugin mediated. Add `broker send <command> [payload]` to `psn-direct-cli.ts` using the `websocket` package in the asar. Known commands: `startGame`, `stop`, `requestGame`, `requestClientId`, `testConnection`, `setAuthCodes`, `setSettings`, `sendXmbCommand`, `routeInputToPlayer`, `routeInputToClient`, `saveDataDeepLink`, `rawDataDeepLink`, `invitationDeepLink`, `gameAlertDeepLink`, `systemStatusDeepLink`.
 
-3. **Broker adapter seam** — with the app running and `broker` reporting reachable, add `broker send <command> [payload]` to `psn-direct-cli.ts` using the `websocket` package in the asar.  Known commands: `startGame`, `stop`, `requestGame`, `requestClientId`, `testConnection`, `setAuthCodes`, `setSettings`, `sendXmbCommand`, `routeInputToPlayer`, `routeInputToClient`, `saveDataDeepLink`, `rawDataDeepLink`, `invitationDeepLink`, `gameAlertDeepLink`, `systemStatusDeepLink`.
+3. **Allocator/session-start endpoint discovery** — with standalone auth now solved, focus on the request/response shape that turns entitlement + title selection into a real stream allocation. The current evidence suggests the remaining boundary is likely broker/plugin-facing rather than a simple extra public HTTP route.
 
 4. **Live `prototype:psplus -- status` integration** — replace the static observation provider calls for login/entitlement state with live calls from `psn-auth.ts`, so the prototype CLI reflects real-time state rather than cached artifacts.
 
@@ -193,9 +193,13 @@ These are the pieces that still prevent a full standalone replacement of the off
 - allocator request/response message shapes
 - exact relationship between:
   - `psnow.playstation.com`
-  - `client.cc.prod.gaikai.com`
-  - `config.cc.prod.gaikai.com`
+  - `cc.prod.gaikai.com/v1/apollo/id`
+  - `client.cc.prod.gaikai.com/v1/events`
+  - `client.cc.prod.gaikai.com/v1/logs`
+  - `config.cc.prod.gaikai.com/v1/config`
   - the session-assigned UDP/2053 endpoints
+- native `requestClientId` event payload, especially `streamServerClientId`
+- broker/plugin contract for `setSettings` → `setAuthCodes` → `requestGame` → `startGame`
 
 ### Media/control transport
 
@@ -218,6 +222,9 @@ A  MVP can already:
 - inspect known bootstrap/runtime/auth observations
 - expose gated entitlement placeholders
 - expose placeholder allocation results
+- mint Gaikai `clientSessionId` / `apolloId`
+- dispatch Gaikai `/v1/events` and `/v1/logs` with valid headers
+- mint `gaikai://local` PSN auth codes for launch preflight
 - hint that stream transport is likely custom UDP
 - provide strong diagnostics and capture comparison tooling
 
