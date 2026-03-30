@@ -73,6 +73,18 @@ test('native observation provider exposes signed-in session, bootstrap, entitlem
             udp443PacketsOut: 0,
             udp443PacketsIn: 0
           }
+        ],
+        transportCandidates: [
+          {
+            remoteIp: '104.142.165.13',
+            protocol: 'udp',
+            remotePort: 2053,
+            hostnames: [],
+            bytesOut: 1000,
+            bytesIn: 200000,
+            packetsOut: 20,
+            packetsIn: 500
+          }
         ]
       }
     ]
@@ -102,13 +114,17 @@ test('native observation provider exposes signed-in session, bootstrap, entitlem
   });
   assert.equal(allocation.state, 'placeholder');
   assert.equal(allocation.sessionId, 'placeholder:CUSA00001');
+  assert.equal(allocation.transportHint, 'custom-udp');
   assert.ok(allocation.endpointHints?.includes('psnow.playstation.com'));
   assert.ok(allocation.endpointHints?.includes('cc.prod.gaikai.com'));
+  assert.ok(allocation.endpointHints?.includes('udp://104.142.165.13:2053'));
 
   const status = await provider.getStatus();
   assert.equal(status.capabilities.nativeBroker.state, 'observed');
   assert.equal(status.capabilities.entitlements.state, 'gated');
   assert.equal(status.capabilities.sessionAllocation.state, 'placeholder');
+  assert.equal(status.capabilities.streamingTransport.state, 'partial');
+  assert.ok(status.capabilities.streamingTransport.evidence.includes('udp://104.142.165.13:2053'));
   assert.equal(status.app.localhostBrokerUrl, 'ws://localhost:1235');
 });
 

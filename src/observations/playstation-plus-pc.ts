@@ -138,11 +138,14 @@ export const PLAYSTATION_PLUS_PC_NETWORK_HINT_HOSTS = [
 ] as const;
 
 export const PLAYSTATION_PLUS_PC_CAPTURED_METADATA_HOSTS = [
+  'accounts.api.playstation.com',
   'ca.account.sony.com',
   'cc.prod.gaikai.com',
+  'client.cc.prod.gaikai.com',
   'cdn-a.sonyentertainmentnetwork.com',
   'checkout.playstation.com',
   'commerce.api.np.km.playstation.net',
+  'config.cc.prod.gaikai.com',
   'download-psnow.playstation.com',
   'gmedia.playstation.com',
   'image.api.playstation.com',
@@ -154,6 +157,7 @@ export const PLAYSTATION_PLUS_PC_CAPTURED_METADATA_HOSTS = [
   'static.playstation.com',
   'telemetry.api.playstation.com',
   'theia.dl.playstation.net',
+  'vulcan.dl.playstation.net',
   'web-commerce-anywhere.playstation.com',
   'web-toolbar.playstation.com',
   'web.np.playstation.com',

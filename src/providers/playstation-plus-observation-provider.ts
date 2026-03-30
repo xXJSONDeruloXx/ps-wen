@@ -24,6 +24,17 @@ function uniqueSorted(values: Iterable<string>) {
   return [...new Set([...values].filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
+function uniqueInOrder(values: Iterable<string>) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
 export type BrowserAuthSummaryArtifact = {
   generatedAt: string;
   currentUrl: string;
@@ -120,6 +131,16 @@ export type NetworkSummaryArtifact = {
     udp443PacketsOut?: number;
     udp443PacketsIn?: number;
   }>;
+  transportCandidates?: Array<{
+    remoteIp: string;
+    protocol: 'tcp' | 'udp';
+    remotePort: number;
+    hostnames?: string[];
+    bytesOut?: number;
+    bytesIn?: number;
+    packetsOut?: number;
+    packetsIn?: number;
+  }>;
 };
 
 export type PlayStationPlusObservationProviderOptions = {
@@ -189,7 +210,24 @@ function collectCapturedHosts(summaries: NetworkSummaryArtifact[]) {
   const fromSignals = summaries.flatMap((summary) => [...(summary.playstationSignals ?? []), ...(summary.sonySignals ?? [])]);
   const fromSni = summaries.flatMap((summary) => (summary.tlsServerNames ?? []).map((entry) => entry.serverName));
   const fromEndpoints = summaries.flatMap((summary) => (summary.remoteEndpoints ?? []).flatMap((entry) => entry.hostnames ?? []));
-  return uniqueSorted([...PLAYSTATION_PLUS_PC_CAPTURED_METADATA_HOSTS, ...fromSignals, ...fromSni, ...fromEndpoints]);
+  const fromTransportCandidates = summaries.flatMap((summary) =>
+    (summary.transportCandidates ?? []).flatMap((entry) => entry.hostnames ?? [])
+  );
+  return uniqueSorted([
+    ...PLAYSTATION_PLUS_PC_CAPTURED_METADATA_HOSTS,
+    ...fromSignals,
+    ...fromSni,
+    ...fromEndpoints,
+    ...fromTransportCandidates
+  ]);
+}
+
+function collectTransportCandidateStrings(summaries: NetworkSummaryArtifact[]) {
+  return uniqueSorted(
+    summaries.flatMap((summary) =>
+      (summary.transportCandidates ?? []).map((entry) => `${entry.protocol}://${entry.remoteIp}:${entry.remotePort}`)
+    )
+  );
 }
 
 function pickSessionSummarySource(options: PlayStationPlusObservationProviderOptions) {
@@ -315,6 +353,7 @@ export class PlayStationPlusObservationProvider
 
   async getProfileBootstrap(): Promise<Record<string, unknown>> {
     const capturedHosts = collectCapturedHosts(this.networkSummaries);
+    const transportCandidates = collectTransportCandidateStrings(this.networkSummaries);
     return {
       session: await this.detectSession(),
       runtime: {
@@ -338,6 +377,7 @@ export class PlayStationPlusObservationProvider
       },
       controlPlane: {
         capturedHosts,
+        transportCandidates,
         kamajiPaths: uniqueSorted(this.pcApolloSummary?.pcSpecificKamajiPaths ?? PLAYSTATION_PLUS_PC_PUBLIC_KAMAJI_PATHS),
         pcUserApiPaths: uniqueSorted(this.pcApolloSummary?.pcUserApiPaths ?? PLAYSTATION_PLUS_PC_PUBLIC_USER_API_PATHS),
         accountApiTemplates: uniqueSorted(
@@ -411,7 +451,7 @@ export class PlayStationPlusObservationProvider
         evidence: sessionAllocationEvidence,
         notes: [
           'Session bootstrap families are clearly visible in static/runtime/capture evidence.',
-          'Actual title entitlement and allocator issuance remain gated until a real queue/start path is captured.'
+          'A real stream-phase capture now exists, but title entitlement semantics and allocator message shapes are still not cleanly isolated.'
         ]
       }
     ];
@@ -419,20 +459,20 @@ export class PlayStationPlusObservationProvider
 
   async allocate(request: SessionAllocationRequest): Promise<SessionAllocation> {
     const capturedHosts = collectCapturedHosts(this.networkSummaries);
-    const endpointHints = uniqueSorted(
-      [
-        ...capturedHosts.filter((host) => /psnow|gaikai|km\.playstation\.net|web\.np\.playstation\.com/i.test(host)),
-        ...uniqueSorted(this.pcApolloSummary?.pcSpecificKamajiPaths ?? []),
-        ...uniqueSorted(this.pcApolloSummary?.commerceHosts ?? []).filter((host) => /km\.playstation\.net|theia|apollo/i.test(host))
-      ].filter(Boolean)
-    );
+    const transportCandidates = collectTransportCandidateStrings(this.networkSummaries);
+    const endpointHints = uniqueInOrder([
+      ...transportCandidates,
+      ...capturedHosts.filter((host) => /psnow|gaikai|km\.playstation\.net|web\.np\.playstation\.com/i.test(host)),
+      ...uniqueSorted(this.pcApolloSummary?.pcSpecificKamajiPaths ?? []),
+      ...uniqueSorted(this.pcApolloSummary?.commerceHosts ?? []).filter((host) => /km\.playstation\.net|theia|apollo/i.test(host))
+    ]);
 
     return {
       state: 'placeholder',
       confidence: 'observed',
       sessionId: request.titleId ? `placeholder:${request.titleId}` : 'placeholder:unknown-title',
       region: request.regionPreference,
-      transportHint: 'unknown',
+      transportHint: transportCandidates.some((value) => value.startsWith('udp://')) ? 'custom-udp' : 'unknown',
       endpointHints,
       evidence: [
         'psnow.playstation.com on-wire DNS/TLS observed',
@@ -441,8 +481,8 @@ export class PlayStationPlusObservationProvider
         'kamaji/api/psnow and kamaji/api/swordfish paths in current public app assets'
       ],
       blockers: [
-        'No successful entitled queue/start capture is available yet.',
-        'Allocator-specific hostnames and transport channels remain unobserved without a real Premium stream path.'
+        'The repo still lacks a short segmented capture that isolates allocator/bootstrap traffic from the long-lived media channel.',
+        'Allocator-specific hostnames and transport channels still need deeper correlation and replay-free confirmation from more entitled stream captures.'
       ],
       notes: [
         'This is an observation-backed placeholder allocation result for wiring control-flow/UI seams only.',
@@ -459,6 +499,7 @@ export class PlayStationPlusObservationProvider
     const session = await this.detectSession();
     const entitlements = await this.listEntitlements();
     const capturedHosts = collectCapturedHosts(this.networkSummaries);
+    const transportCandidates = collectTransportCandidateStrings(this.networkSummaries);
     const localhostBrokerUrl = this.pcSurfaceSummary?.ipc?.localWebSocket
       ? `ws://${this.pcSurfaceSummary.ipc.localWebSocket.host}:${this.pcSurfaceSummary.ipc.localWebSocket.port}`
       : undefined;
@@ -519,11 +560,15 @@ export class PlayStationPlusObservationProvider
           notes: ['A real allocator result is still unavailable; the prototype only returns placeholder allocation responses.']
         },
         streamingTransport: {
-          state: 'unknown',
-          evidence: uniqueSorted(
-            capturedHosts.filter((host) => /gaikai|psnow|web\.np\.playstation\.com|km\.playstation\.net/i.test(host))
-          ),
-          notes: ['No entitled live media transport capture exists yet, so transport remains intentionally undefined.']
+          state: transportCandidates.length > 0 ? 'partial' : 'unknown',
+          evidence: uniqueInOrder([
+            ...transportCandidates,
+            ...capturedHosts.filter((host) => /gaikai|psnow|web\.np\.playstation\.com|km\.playstation\.net/i.test(host))
+          ]),
+          notes:
+            transportCandidates.length > 0
+              ? ['Live stream-phase captures now show high-volume UDP transport candidates, but protocol/session semantics are still not fully mapped.']
+              : ['No entitled live media transport capture exists yet, so transport remains intentionally undefined.']
         }
       },
       nextSteps: [

@@ -22,6 +22,17 @@ export type RemoteEndpointSummary = {
   udp443PacketsIn: number;
 };
 
+export type RemoteServiceSummary = {
+  remoteIp: string;
+  protocol: 'tcp' | 'udp';
+  remotePort: number;
+  hostnames: string[];
+  bytesOut: number;
+  bytesIn: number;
+  packetsOut: number;
+  packetsIn: number;
+};
+
 export type PcapngMetadataSummary = {
   packetCount: number;
   localIps: string[];
@@ -29,6 +40,8 @@ export type PcapngMetadataSummary = {
   dnsQueries: DnsQuestionSummary[];
   tlsServerNames: TlsServerNameSummary[];
   remoteEndpoints: RemoteEndpointSummary[];
+  remoteServices: RemoteServiceSummary[];
+  transportCandidates: RemoteServiceSummary[];
   playstationSignals: string[];
   sonySignals: string[];
 };
@@ -92,6 +105,14 @@ type RemoteEndpointAccumulator = {
   tcp443BytesIn: number;
   udp443PacketsOut: number;
   udp443PacketsIn: number;
+};
+
+type RemoteServiceAccumulator = {
+  hostnames: Set<string>;
+  bytesOut: number;
+  bytesIn: number;
+  packetsOut: number;
+  packetsIn: number;
 };
 
 const PCAPNG_SECTION_HEADER_BLOCK = 0x0a0d0d0a;
@@ -407,6 +428,20 @@ function upsertSetMap(map: Map<string, Set<string>>, key: string, value: string)
   map.set(key, values);
 }
 
+function totalServiceBytes(summary: Pick<RemoteServiceSummary, 'bytesOut' | 'bytesIn'>) {
+  return summary.bytesOut + summary.bytesIn;
+}
+
+function totalEndpoint443Bytes(summary: Pick<RemoteEndpointSummary, 'tcp443BytesOut' | 'tcp443BytesIn'>) {
+  return summary.tcp443BytesOut + summary.tcp443BytesIn;
+}
+
+function isHighVolumeTransportCandidate(summary: RemoteServiceSummary) {
+  if (summary.protocol !== 'udp') return false;
+  if ([53, 67, 68, 123, 137, 138, 1900, 5353, 5355, 443].includes(summary.remotePort)) return false;
+  return totalServiceBytes(summary) >= 100_000 || summary.packetsOut + summary.packetsIn >= 1_000;
+}
+
 function tryResolveTlsServerName(flow: TcpFlowAccumulator) {
   if (flow.serverName || flow.stopped || flow.segments.size === 0) return;
 
@@ -454,6 +489,7 @@ export function summarizePcapngMetadata(bytes: Uint8Array | Buffer): PcapngMetad
   const hostnameByIp = new Map<string, Set<string>>();
   const tlsServerNames = new Map<string, TlsServerNameAccumulator>();
   const remoteEndpoints = new Map<string, RemoteEndpointAccumulator>();
+  const remoteServices = new Map<string, RemoteServiceAccumulator>();
   const tcpFlows = new Map<string, TcpFlowAccumulator>();
 
   let packetCount = 0;
@@ -479,7 +515,7 @@ export function summarizePcapngMetadata(bytes: Uint8Array | Buffer): PcapngMetad
     const dstIsLocal = isLocalIp(packet.dstIp);
     const remoteIp = srcIsLocal && !dstIsLocal ? packet.dstIp : !srcIsLocal && dstIsLocal ? packet.srcIp : undefined;
     if (remoteIp) {
-      const summary = remoteEndpoints.get(remoteIp) ?? {
+      const endpointSummary = remoteEndpoints.get(remoteIp) ?? {
         hostnames: new Set<string>(),
         tcp443BytesOut: 0,
         tcp443BytesIn: 0,
@@ -488,19 +524,40 @@ export function summarizePcapngMetadata(bytes: Uint8Array | Buffer): PcapngMetad
       };
 
       if (packet.protocol === 'tcp' && packet.dstPort === 443 && srcIsLocal) {
-        summary.tcp443BytesOut += packet.ipByteLength;
+        endpointSummary.tcp443BytesOut += packet.ipByteLength;
       }
       if (packet.protocol === 'tcp' && packet.srcPort === 443 && dstIsLocal) {
-        summary.tcp443BytesIn += packet.ipByteLength;
+        endpointSummary.tcp443BytesIn += packet.ipByteLength;
       }
       if (packet.protocol === 'udp' && packet.dstPort === 443 && srcIsLocal) {
-        summary.udp443PacketsOut += 1;
+        endpointSummary.udp443PacketsOut += 1;
       }
       if (packet.protocol === 'udp' && packet.srcPort === 443 && dstIsLocal) {
-        summary.udp443PacketsIn += 1;
+        endpointSummary.udp443PacketsIn += 1;
       }
 
-      remoteEndpoints.set(remoteIp, summary);
+      remoteEndpoints.set(remoteIp, endpointSummary);
+
+      const remotePort = srcIsLocal && !dstIsLocal ? packet.dstPort : packet.srcPort;
+      const serviceKey = `${remoteIp}|${packet.protocol}|${remotePort}`;
+      const serviceSummary = remoteServices.get(serviceKey) ?? {
+        hostnames: new Set<string>(),
+        bytesOut: 0,
+        bytesIn: 0,
+        packetsOut: 0,
+        packetsIn: 0
+      };
+
+      if (srcIsLocal && !dstIsLocal) {
+        serviceSummary.bytesOut += packet.ipByteLength;
+        serviceSummary.packetsOut += 1;
+      }
+      if (!srcIsLocal && dstIsLocal) {
+        serviceSummary.bytesIn += packet.ipByteLength;
+        serviceSummary.packetsIn += 1;
+      }
+
+      remoteServices.set(serviceKey, serviceSummary);
     }
 
     if (packet.protocol === 'udp' || packet.protocol === 'tcp') {
@@ -563,9 +620,32 @@ export function summarizePcapngMetadata(bytes: Uint8Array | Buffer): PcapngMetad
 
   for (const [remoteIp, names] of hostnameByIp.entries()) {
     const remoteEndpoint = remoteEndpoints.get(remoteIp);
-    if (!remoteEndpoint) continue;
-    for (const name of names) remoteEndpoint.hostnames.add(name);
+    if (remoteEndpoint) {
+      for (const name of names) remoteEndpoint.hostnames.add(name);
+    }
+
+    for (const [serviceKey, serviceSummary] of remoteServices.entries()) {
+      if (!serviceKey.startsWith(`${remoteIp}|`)) continue;
+      for (const name of names) serviceSummary.hostnames.add(name);
+    }
   }
+
+  const remoteServiceSummaries = [...remoteServices.entries()]
+    .map(([serviceKey, summary]) => {
+      const [remoteIp, protocol, remotePort] = serviceKey.split('|');
+      return {
+        remoteIp,
+        protocol: protocol as 'tcp' | 'udp',
+        remotePort: Number(remotePort),
+        hostnames: uniqueSorted(summary.hostnames),
+        bytesOut: summary.bytesOut,
+        bytesIn: summary.bytesIn,
+        packetsOut: summary.packetsOut,
+        packetsIn: summary.packetsIn
+      } satisfies RemoteServiceSummary;
+    })
+    .filter((summary) => totalServiceBytes(summary) > 0)
+    .sort((a, b) => totalServiceBytes(b) - totalServiceBytes(a) || a.remoteIp.localeCompare(b.remoteIp) || a.remotePort - b.remotePort);
 
   const allHostnames = uniqueSorted([
     ...dnsQuestionSummaries.keys(),
@@ -610,11 +690,9 @@ export function summarizePcapngMetadata(bytes: Uint8Array | Buffer): PcapngMetad
           summary.udp443PacketsOut > 0 ||
           summary.udp443PacketsIn > 0
       )
-      .sort((a, b) => {
-        const aBytes = a.tcp443BytesOut + a.tcp443BytesIn;
-        const bBytes = b.tcp443BytesOut + b.tcp443BytesIn;
-        return bBytes - aBytes || a.remoteIp.localeCompare(b.remoteIp);
-      }),
+      .sort((a, b) => totalEndpoint443Bytes(b) - totalEndpoint443Bytes(a) || a.remoteIp.localeCompare(b.remoteIp)),
+    remoteServices: remoteServiceSummaries,
+    transportCandidates: remoteServiceSummaries.filter(isHighVolumeTransportCandidate),
     playstationSignals: allHostnames.filter((value) => /playstation|psnow/i.test(value)),
     sonySignals: allHostnames.filter((value) => /sony/i.test(value))
   };

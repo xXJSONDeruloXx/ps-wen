@@ -57,6 +57,17 @@ async function main() {
   }
   console.log('');
 
+  console.log('== High-volume transport candidates ==');
+  for (const entry of summary.transportCandidates.slice(0, 40)) {
+    console.log(
+      `${entry.protocol.toUpperCase()} ${entry.remoteIp}:${entry.remotePort} hosts=[${entry.hostnames.join(', ')}] bytesOut=${entry.bytesOut} bytesIn=${entry.bytesIn} packetsOut=${entry.packetsOut} packetsIn=${entry.packetsIn}`
+    );
+  }
+  if (summary.transportCandidates.length === 0) {
+    console.log('(none)');
+  }
+  console.log('');
+
   console.log('== PlayStation / Sony signals ==');
   const signals = [...summary.playstationSignals, ...summary.sonySignals.filter((value) => !summary.playstationSignals.includes(value))];
   for (const value of signals) {

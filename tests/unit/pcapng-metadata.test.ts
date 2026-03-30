@@ -186,7 +186,7 @@ test('extractTlsServerName reads a minimal client hello SNI', () => {
   assert.equal(extractTlsServerName(payload), 'psnow.playstation.com');
 });
 
-test('summarizePcapngMetadata extracts DNS, SNI, and remote endpoint hostnames', () => {
+test('summarizePcapngMetadata extracts DNS, SNI, remote endpoints, and high-volume transport candidates', () => {
   const dnsQuery = buildUdpIpv4Frame({
     srcIp: '192.168.0.10',
     dstIp: '192.168.0.1',
@@ -209,10 +209,24 @@ test('summarizePcapngMetadata extracts DNS, SNI, and remote endpoint hostnames',
     seq: 1000,
     payload: buildTlsClientHelloSni('psnow.playstation.com')
   });
+  const udpTransportOut = buildUdpIpv4Frame({
+    srcIp: '192.168.0.10',
+    dstIp: '104.142.165.13',
+    srcPort: 61000,
+    dstPort: 2053,
+    payload: Buffer.alloc(60000, 0xaa)
+  });
+  const udpTransportIn = buildUdpIpv4Frame({
+    srcIp: '104.142.165.13',
+    dstIp: '192.168.0.10',
+    srcPort: 2053,
+    dstPort: 61000,
+    payload: Buffer.alloc(60000, 0xbb)
+  });
 
-  const summary = summarizePcapngMetadata(buildPcapng([dnsQuery, dnsResponse, tlsClientHello]));
+  const summary = summarizePcapngMetadata(buildPcapng([dnsQuery, dnsResponse, tlsClientHello, udpTransportOut, udpTransportIn]));
 
-  assert.equal(summary.packetCount, 3);
+  assert.equal(summary.packetCount, 5);
   assert.deepEqual(summary.dnsServers, ['192.168.0.1']);
   assert.deepEqual(summary.playstationSignals, ['psnow.playstation.com']);
   assert.ok(summary.localIps.includes('192.168.0.10'));
@@ -230,6 +244,21 @@ test('summarizePcapngMetadata extracts DNS, SNI, and remote endpoint hostnames',
         entry.remoteIp === '23.213.71.109' &&
         entry.hostnames.includes('psnow.playstation.com') &&
         entry.tcp443BytesOut > 0
+    )
+  );
+  assert.ok(
+    summary.remoteServices.some(
+      (entry) =>
+        entry.remoteIp === '104.142.165.13' &&
+        entry.protocol === 'udp' &&
+        entry.remotePort === 2053 &&
+        entry.bytesOut > 0 &&
+        entry.bytesIn > 0
+    )
+  );
+  assert.ok(
+    summary.transportCandidates.some(
+      (entry) => entry.remoteIp === '104.142.165.13' && entry.protocol === 'udp' && entry.remotePort === 2053
     )
   );
 });
