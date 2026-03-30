@@ -354,6 +354,7 @@ async function main() {
           : Boolean(normalizeObject(params).forceLogout);
         ack(connection, command, { forceLogout });
         sendEvent(connection, 'launchResponse', { mocked: true, forceLogout, target }, '002.0007');
+        sendEvent(connection, 'GOT_LAUNCH_SPEC', { mocked: true, forceLogout, target }, '002.0006');
         sendEvent(connection, 'PROCESS_END', { command, ok: true, mocked: true }, 1);
         return;
       }
@@ -361,6 +362,8 @@ async function main() {
         state.lastStartGameAt = new Date().toISOString();
         ack(connection, command);
         sendEvent(connection, 'sessionStart', { mocked: true, status: 'Streaming' }, '002.0001');
+        sendEvent(connection, 'VIDEO_START', { mocked: true, status: 'Streaming' }, '022.0015');
+        sendEvent(connection, 'IS_STREAMING', { isStreaming: 'true' }, 'isStreaming');
         return;
       }
       case 'stop': {

@@ -15,6 +15,10 @@ This does **not** start a real stream or render frames, but it does prove that w
 can execute and observe a meaningful part of Sony's real launch orchestration on
 this machine.
 
+It also gives a useful interpretation for the earlier `orbis` values: `Orbis`
+was Sony's internal PS4 codename, which matches the browser/console-flavored
+`model/platform = orbis` path we observe here.
+
 ## Command
 
 ```bash
@@ -92,13 +96,19 @@ Observed PC-side command flow included:
 6. `requestClientId`
 7. `setSettings` again with staged auth codes, `streamServerAuthCode`, `apolloSessionId`, and `entitlementID`
 8. `requestGame`
+9. synthetic `GotLaunchSpec` from the emulator causes the real PC bundle to call `startGame`
+10. emulator returns `sessionStart`, `VIDEO_START`, and `IS_STREAMING`
+11. post-launch controller-routing hooks can now be exercised too:
+    - `routeInputToClient`
+    - `routeInputToPlayer`
 
-So the PC path materially differs from BrowserAPI in two major ways:
+So the PC path materially differs from BrowserAPI in several major ways:
 
 - it uses **`WINDOWS` / `PC`** settings values
 - it appears to fold auth staging back into **`setSettings`**, not a standalone
   broker `setAuthCodes` command
-
+- it will escalate to a broker `startGame` call when the expected launch-spec
+  event arrives
 ## Important details learned
 
 ### 1. The browser-path launch contract is real enough to exercise on Mac
@@ -182,7 +192,46 @@ Observed broker payload:
 }
 ```
 
-### 7. Browser-path and PC-path `setSettings` are clearly different
+### 7. PCClientAPI can now be driven through `startGame()` on macOS
+
+After teaching the emulator to emit synthetic:
+
+- `GotLaunchSpec`
+- `VIDEO_START`
+- `IS_STREAMING`
+
+we observed the real PC bundle issue a broker:
+
+```json
+{"command":"startGame","params":{}}
+```
+
+This is the first Mac-side app-free confirmation that the require-able PC bundle
+path can be driven all the way through the **`startGame` broker boundary**.
+
+Important limitation: this is still against the emulator, so it does **not**
+prove real stream allocation or real rendered media.
+
+### 8. Post-launch controller routing can also be exercised
+
+After the synthetic PC `startGame` step, the harness can now call the real
+PCClientAPI methods:
+
+- `captureGamepad()` -> broker `routeInputToClient`
+- `releaseGamepad()` -> broker `routeInputToPlayer`
+
+Observed broker frames:
+
+```json
+{"command":"routeInputToClient","params":{}}
+{"command":"routeInputToPlayer","params":{}}
+```
+
+This still does **not** mean actual controller input is reaching a real game.
+It only proves that the real bundle's post-launch controller-routing control
+commands can be exercised on macOS against the local broker boundary.
+
+### 9. Browser-path and PC-path `setSettings` are clearly different
 
 The observed **browser** `setSettings` payload used:
 
@@ -197,7 +246,7 @@ The observed **PC** `setSettings` payload used:
 So the harness now directly confirms that Sony's bundle really carries two
 meaningfully different launch contracts, not just one path with cosmetic naming.
 
-### 8. `requestGame` evidence still needs careful wording
+### 10. `requestGame` evidence still needs careful wording
 
 The PC path calls `plugin.requestGame(n)` where `n` is a boolean derived from
 `forceLogout`.
@@ -250,7 +299,8 @@ The missing Windows-native pieces remain:
 
 - a real `streamServerClientId` from the official runtime rather than our mock
 - confirmation of the real wire format around PC `requestGame`
-- `startGame()` / `showPlayer()` behavior on the true PC-native runtime
+- confirmation that the real runtime emits the same post-`requestGame` launch-spec / start sequence we synthesized here
+- real controller input propagation beyond routing commands
 - any true player/media runtime behavior
 
 ## Best next step
@@ -259,11 +309,11 @@ Use the same harness idea to push closer to the PC-native path:
 
 1. tighten the PC harness around the remaining native-only edge cases:
    - whether `requestGame` is really raw boolean on the broker wire
-   - whether `startGame()` can be driven after a suitable synthetic event
+   - whether the real runtime's post-`requestGame` event sequence matches our synthetic `GotLaunchSpec -> startGame -> VIDEO_START -> IS_STREAMING` path
 2. add explicit logging/serialization of the pre-broker plugin-call arguments so
    wire-format derivations are separated from actual observed broker frames
-3. capture whether additional PC runtime events are needed after `requestGame`
-   before `startGame()` becomes meaningful
+3. extend post-launch probing beyond routing to determine whether any further
+   broker-visible input/control commands follow `routeInputToClient` / `routeInputToPlayer`
 4. if a Windows runtime becomes available later, compare the real PC broker
    replies against these Mac-side PCClientAPI traces
 

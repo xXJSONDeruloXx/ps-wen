@@ -163,6 +163,9 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
           var name = String(parsed.name);
           if (name === 'GOT_CLIENT_ID') name = pluginEventMap.GOT_CLIENT_ID;
           if (name === 'PROCESS_END') name = pluginEventMap.PROCESS_END;
+          if (name === 'GOT_LAUNCH_SPEC') name = pluginEventMap.GOT_LAUNCH_SPEC;
+          if (name === 'VIDEO_START') name = pluginEventMap.VIDEO_START;
+          if (name === 'IS_STREAMING') name = pluginEventMap.IS_STREAMING;
           var payload = parsed.payload;
           var code = parsed.code;
           if (name === 'GOT_CLIENT_ID' && payload && typeof payload === 'object') {
@@ -365,6 +368,9 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
       var translatedName = name;
       if (translatedName === 'GOT_CLIENT_ID') translatedName = pluginEventMap.GOT_CLIENT_ID;
       if (translatedName === 'PROCESS_END') translatedName = pluginEventMap.PROCESS_END;
+      if (translatedName === 'GOT_LAUNCH_SPEC') translatedName = pluginEventMap.GOT_LAUNCH_SPEC;
+      if (translatedName === 'VIDEO_START') translatedName = pluginEventMap.VIDEO_START;
+      if (translatedName === 'IS_STREAMING') translatedName = pluginEventMap.IS_STREAMING;
       var resultText = JSON.stringify(payload || {});
       if (this.eventHandler) this.eventHandler({ name: translatedName, code: code, result: resultText });
       if (this.callbackEvent) this.callbackEvent({ name: translatedName, code: code, result: resultText });
@@ -446,8 +452,14 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
       record(label + '.isQueued', {});
       return false;
     };
-    BridgePlugin.prototype.routeInputToPlayer = function () { record(label + '.routeInputToPlayer', {}); };
-    BridgePlugin.prototype.routeInputToClient = function () { record(label + '.routeInputToClient', {}); };
+    BridgePlugin.prototype.routeInputToPlayer = function () {
+      record(label + '.routeInputToPlayer', {});
+      return this.send('routeInputToPlayer', {});
+    };
+    BridgePlugin.prototype.routeInputToClient = function () {
+      record(label + '.routeInputToClient', {});
+      return this.send('routeInputToClient', {});
+    };
     BridgePlugin.prototype.sendXmbCommand = function (a, b) { record(label + '.sendXmbCommand', { a: a, b: b }); };
     BridgePlugin.prototype.saveDataDeepLink = function (payload) { record(label + '.saveDataDeepLink', payload); };
     BridgePlugin.prototype.rawDataDeepLink = function (a, b) { record(label + '.rawDataDeepLink', { a: a, b: b }); };
@@ -544,6 +556,13 @@ const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
   scenarios.push(await withTimeout('pc.cloudPlayer.launchGame', function () {
     return pcCloudPlayer.launchGame(requestedGame);
   }, 12000));
+  await new Promise(function (resolve) { setTimeout(resolve, 1200); });
+  scenarios.push(await withTimeout('pc.platformAPI.captureGamepad', function () {
+    return pcCloudPlayer.platformAPI && pcCloudPlayer.platformAPI.captureGamepad ? pcCloudPlayer.platformAPI.captureGamepad() : null;
+  }, 2000));
+  scenarios.push(await withTimeout('pc.platformAPI.releaseGamepad', function () {
+    return pcCloudPlayer.platformAPI && pcCloudPlayer.platformAPI.releaseGamepad ? pcCloudPlayer.platformAPI.releaseGamepad() : null;
+  }, 2000));
   record('pluginEventMap.sample', {
     GOT_CLIENT_ID: pluginEventMap.GOT_CLIENT_ID,
     PROCESS_END: pluginEventMap.PROCESS_END
