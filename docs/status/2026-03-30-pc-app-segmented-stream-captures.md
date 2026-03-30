@@ -32,6 +32,11 @@ npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-20184
 $env:CAPTURE_DURATION='90'
 npm run capture:metadata:windows
 npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-202615.pcapng
+
+# click-from-list / waiting-for-server slice
+$env:CAPTURE_DURATION='60'
+npm run capture:metadata:windows
+npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-204138.pcapng
 ```
 
 ## Artifacts
@@ -44,6 +49,8 @@ Local-only generated artifacts:
 - `artifacts/network/ps-cloud-metadata-20260329-201841.summary.json`
 - `artifacts/network/ps-cloud-metadata-20260329-202615.pcapng`
 - `artifacts/network/ps-cloud-metadata-20260329-202615.summary.json`
+- `artifacts/network/ps-cloud-metadata-20260329-204138.pcapng`
+- `artifacts/network/ps-cloud-metadata-20260329-204138.summary.json`
 
 ## Capture A — `201241` launch/start slice
 
@@ -111,6 +118,32 @@ Interpretation:
   - or the same long-lived session-side transport family
 - this does **not** prove exact save-management semantics, but it narrows the possibilities considerably
 
+## Capture D — `204138` click-from-list / waiting-for-server slice
+
+This capture started when the user clicked **Days Gone** in the title list and then waited while the service appeared to be assigning a server. The user believes the capture may end before the first visible frame, but the network shape suggests that allocation/startup was already well underway.
+
+Visible families included:
+
+- `ca.account.sony.com`
+- `cc.prod.gaikai.com`
+- `client.cc.prod.gaikai.com`
+- `commerce.api.np.km.playstation.net`
+- `config.cc.prod.gaikai.com`
+- `download-psnow.playstation.com`
+- `merchandise.api.playstation.com`
+- `psnow.playstation.com`
+- `theia.dl.playstation.net`
+- `web.np.playstation.com`
+- Sony-owned UDP/2053 candidates:
+  - `udp://104.142.161.27:2053`
+  - `udp://104.142.161.133:2053`
+
+Interpretation:
+
+- this does **not** look like a pure pre-allocation idle wait
+- `client.cc.prod.gaikai.com` + `config.cc.prod.gaikai.com` + active Sony-owned UDP/2053 strongly suggest the session had already moved into stream bootstrap or early media startup, even if the first picture was not yet visible on screen
+- compared with the shorter launch/start slice, this capture omits `accounts.api.playstation.com` but retains most of the app/bootstrap/control family, which is consistent with a user that is already authenticated and is now entering the allocator/startup path for a selected title
+
 ## Cross-capture comparison
 
 ### 1. Bootstrap/setup hosts are front-loaded
@@ -125,6 +158,8 @@ The launch/start slice shows several hosts that do **not** remain prominent in t
 - `web.np.playstation.com`
 
 That is consistent with a bootstrap/config phase rather than a steady-state stream phase.
+
+The click-from-list / waiting-for-server slice sits between those extremes: it keeps most of the bootstrap/control family alive while also showing active Sony-owned UDP/2053. That makes it the strongest current candidate for a **post-click allocator / pre-picture** window.
 
 ### 2. `client.cc.prod.gaikai.com` looks like a persistent session-side control host
 
@@ -192,5 +227,8 @@ These segmented captures still do **not** reveal:
 
 1. **Delete-from-online-storage only** capture, matching the copy-only run.
 2. **Overlay-only** capture (open overlay, toggle vibration once, close overlay).
-3. A shorter **launch-to-picture-only** capture, keeping all post-picture interactions out of the window.
+3. Another short **click-from-list to picture-only** capture, but with explicit operator timing notes for:
+   - click title
+   - queue/server wait begins
+   - first visible picture
 4. Any future note-taking or broker correlation that can align user action timestamps against these segmented host/port families.

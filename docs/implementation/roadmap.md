@@ -83,8 +83,9 @@ This is the living done/todo tracker for turning current evidence into a clean-r
    - compare directly against the copy-only run
 2. **Overlay-only** segmented capture
    - open overlay, toggle vibration once, close overlay
-3. **Cleaner launch-to-picture-only** segmented capture
-   - minimize all post-picture interactions
+3. **Cleaner click-from-list to picture-only** segmented capture
+   - one such run already suggests allocation/startup had progressed into `client.cc` + Sony-owned UDP/2053 before the first visible frame
+   - repeat with explicit timing notes for title click and first picture
 4. **Action timestamp correlation**
    - note approximate user action times during capture windows so host/port shifts can be matched to UI actions more precisely
 
