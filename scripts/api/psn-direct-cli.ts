@@ -18,6 +18,12 @@
  *   npm run api:psn-direct -- broker [--host localhost] [--port 1235] [--json]
  *   npm run api:psn-direct -- broker send <command> [payload-json] [--target QAS] [--wait-ms 1500] [--json]
  *   npm run api:psn-direct -- broker send --raw '{"command":"requestClientId"}' [--json]
+ *   npm run api:psn-direct -- gaikai id [--method GET|POST] [--json]
+ *   npm run api:psn-direct -- gaikai config [--client-session-id <id>] [--json]
+ *   npm run api:psn-direct -- gaikai auth-code [--kind cloud|cloud-ps4|ps3|sso] [--json]
+ *   npm run api:psn-direct -- gaikai event [--preset app-load] [--client-session-id <id>] [--json]
+ *   npm run api:psn-direct -- gaikai log [--message <text>] [--client-session-id <id>] [--json]
+ *   npm run api:psn-direct -- gaikai preflight [--json]
  *   npm run api:psn-direct -- status [--json]
  */
 
@@ -28,6 +34,7 @@ import {
   resolveNpsso,
   exchangeNpssoForToken,
   exchangeNpssoForCode,
+  exchangeNpssoForGaikaiCode,
   queryKamajiGeo,
   probeBrokerReachability,
   establishKamajiSession,
@@ -35,6 +42,12 @@ import {
   queryKamajiUserStores,
   queryKamajiUserProfile,
   queryKamajiUserEntitlements,
+  queryGaikaiApolloId,
+  queryGaikaiConfig,
+  dispatchGaikaiEvent,
+  dispatchGaikaiLog,
+  GAIKAI_AUTH_CODE_FLOWS,
+  type GaikaiAuthCodeKind,
   PSN_OAUTH_CLIENTS,
   type PsnOAuthClientId,
 } from '../lib/psn-auth.js';
@@ -71,6 +84,12 @@ function usage(): never {
       '  npm run api:psn-direct -- broker send <command> [payload-json] [--target QAS] [--wait-ms 1500] [--json]',
       '  npm run api:psn-direct -- broker send --payload <json> <command>',
       '  npm run api:psn-direct -- broker send --raw <text>',
+      '  npm run api:psn-direct -- gaikai id [--method GET|POST] [--json]',
+      '  npm run api:psn-direct -- gaikai config [--client-session-id <id>] [--json]',
+      `  npm run api:psn-direct -- gaikai auth-code [--kind ${Object.keys(GAIKAI_AUTH_CODE_FLOWS).join('|')}] [--json]`,
+      '  npm run api:psn-direct -- gaikai event [--preset app-load] [--client-session-id <id>] [--json]',
+      '  npm run api:psn-direct -- gaikai log [--message <text>] [--client-session-id <id>] [--json]',
+      '  npm run api:psn-direct -- gaikai preflight [--json]',
       '  npm run api:psn-direct -- status [--json]',
       '',
       'Global NPSSO sources (checked in this order):',
@@ -154,6 +173,21 @@ function missingNpssoMessage(parsed: ParsedArgs): string {
     '  3. npm run auth:extract-npsso',
     'Then re-run this command with --storage-state artifacts/auth/playstation-storage-state.json',
   ].join(' ');
+}
+
+async function getEntitlementsAccessToken(parsed: ParsedArgs) {
+  const { npsso, source } = await getNpsso(parsed);
+  if (!npsso) throw new Error(missingNpssoMessage(parsed));
+  const exchange = await exchangeNpssoForToken(npsso, 'entitlements');
+  return { npsso, source, exchange };
+}
+
+async function getGaikaiClientSession(parsed: ParsedArgs) {
+  const access = await getEntitlementsAccessToken(parsed);
+  const methodFlag = typeof parsed.flags.method === 'string' ? parsed.flags.method.toUpperCase() : 'GET';
+  const method = methodFlag === 'POST' ? 'POST' : 'GET';
+  const apollo = await queryGaikaiApolloId(access.exchange.accessToken, { method });
+  return { ...access, apollo, method };
 }
 
 // ---------------------------------------------------------------------------
@@ -479,6 +513,250 @@ async function cmdCatalog(parsed: ParsedArgs) {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// gaikai  — Gaikai control-plane helpers
+// ---------------------------------------------------------------------------
+const DEFAULT_GAIKAI_PREFLIGHT_OUT = 'artifacts/auth/gaikai-preflight.json';
+
+function gaikaiPresetEvent(clientSessionId: string) {
+  return {
+    eventCode: '080.0065',
+    name: 'PageView.App.Load',
+    componentVersion: '2.2.0',
+    appName: 'Apollo',
+    data: {
+      clientSessionId,
+      platform: 'PC',
+      environment: 'np',
+      eventSource: 'launcher',
+      isMember: true,
+      uxEventTimestamp: Date.now(),
+      type: 'PageView',
+    },
+  };
+}
+
+async function cmdGaikai(parsed: ParsedArgs) {
+  const subcommand = parsed.positional[0];
+  if (!subcommand) {
+    throw new Error('Usage: gaikai <id|config|auth-code|event|log|preflight>');
+  }
+
+  if (subcommand === 'id') {
+    const { exchange, apollo, method } = await getGaikaiClientSession(parsed);
+    const result = {
+      generatedAt: new Date().toISOString(),
+      accessTokenExpiresIn: exchange.expiresIn,
+      ...apollo,
+    };
+    if (asJson(parsed)) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`Method          : ${result.method}`);
+    console.log(`Apollo ID       : ${result.apolloId}`);
+    console.log(`ClientSessionId : ${result.clientSessionId}`);
+    console.log(`Token expires   : ${result.accessTokenExpiresIn}s`);
+    return;
+  }
+
+  if (subcommand === 'config') {
+    const access = await getEntitlementsAccessToken(parsed);
+    const clientSessionId = typeof parsed.flags['client-session-id'] === 'string'
+      ? parsed.flags['client-session-id']
+      : (await queryGaikaiApolloId(access.exchange.accessToken)).clientSessionId;
+    const config = await queryGaikaiConfig(access.exchange.accessToken, { clientSessionId });
+    const result = {
+      generatedAt: new Date().toISOString(),
+      clientSessionId,
+      ...config,
+    };
+    if (asJson(parsed)) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`ClientSessionId : ${clientSessionId}`);
+    console.log(`Config keys     : ${Object.keys(config.decodedConfig).join(', ')}`);
+    const productConfigs = (config.decodedConfig.productConfigs as Record<string, unknown> | undefined) ?? {};
+    for (const [key, value] of Object.entries(productConfigs)) {
+      console.log(`  ${key.padEnd(14)}: ${String(value)}`);
+    }
+    return;
+  }
+
+  if (subcommand === 'auth-code') {
+    const kind = (typeof parsed.flags.kind === 'string' ? parsed.flags.kind : 'cloud') as GaikaiAuthCodeKind;
+    if (!(kind in GAIKAI_AUTH_CODE_FLOWS)) {
+      throw new Error(`Unknown gaikai auth-code kind: ${kind}`);
+    }
+    const { npsso, source } = await getNpsso(parsed);
+    if (!npsso) throw new Error(missingNpssoMessage(parsed));
+    const code = await exchangeNpssoForGaikaiCode(npsso, kind);
+    const result = { npssoSource: source, ...code };
+    if (asJson(parsed)) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`Kind            : ${kind}`);
+    console.log(`Client ID       : ${result.clientId}`);
+    console.log(`Code            : ${result.code}`);
+    console.log(`Scope           : ${result.scope}`);
+    console.log(`CID             : ${result.correlationId}`);
+    if (result.targetUrl) console.log(`Target URL      : ${result.targetUrl}`);
+    return;
+  }
+
+  if (subcommand === 'event') {
+    const access = await getEntitlementsAccessToken(parsed);
+    const clientSessionId = typeof parsed.flags['client-session-id'] === 'string'
+      ? parsed.flags['client-session-id']
+      : (await queryGaikaiApolloId(access.exchange.accessToken)).clientSessionId;
+    const preset = typeof parsed.flags.preset === 'string' ? parsed.flags.preset : 'app-load';
+    const eventPayload = typeof parsed.flags.event === 'string'
+      ? parseJsonFlag(parsed.flags.event, '--event')
+      : (preset === 'app-load' ? gaikaiPresetEvent(clientSessionId) : null);
+    if (!eventPayload) {
+      throw new Error('Provide --event <json> or use --preset app-load');
+    }
+    const dispatch = await dispatchGaikaiEvent(access.exchange.accessToken, clientSessionId, eventPayload);
+    const result = {
+      generatedAt: new Date().toISOString(),
+      clientSessionId,
+      preset,
+      payload: eventPayload,
+      ...dispatch,
+    };
+    if (asJson(parsed)) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`ClientSessionId : ${clientSessionId}`);
+    console.log(`Status          : ${result.status}`);
+    console.log(`OK              : ${result.ok}`);
+    console.log(`Body            : ${result.bodyText.slice(0, 240) || '(empty)'}`);
+    return;
+  }
+
+  if (subcommand === 'log') {
+    const access = await getEntitlementsAccessToken(parsed);
+    const clientSessionId = typeof parsed.flags['client-session-id'] === 'string'
+      ? parsed.flags['client-session-id']
+      : (await queryGaikaiApolloId(access.exchange.accessToken)).clientSessionId;
+    const message = typeof parsed.flags.message === 'string' ? parsed.flags.message : 'ps-wen gaikai probe';
+    const level = typeof parsed.flags.level === 'string' ? parsed.flags.level : 'info';
+    const payload = typeof parsed.flags.payload === 'string'
+      ? parseJsonFlag(parsed.flags.payload, '--payload')
+      : { level, message, clientSessionId };
+    const dispatch = await dispatchGaikaiLog(access.exchange.accessToken, clientSessionId, payload);
+    const result = {
+      generatedAt: new Date().toISOString(),
+      clientSessionId,
+      payload,
+      ...dispatch,
+    };
+    if (asJson(parsed)) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`ClientSessionId : ${clientSessionId}`);
+    console.log(`Status          : ${result.status}`);
+    console.log(`OK              : ${result.ok}`);
+    console.log(`Body            : ${result.bodyText.slice(0, 240) || '(empty)'}`);
+    return;
+  }
+
+  if (subcommand === 'preflight') {
+    const access = await getEntitlementsAccessToken(parsed);
+    const session = await establishKamajiAccessTokenSession(access.npsso, access.exchange.accessToken);
+    const apollo = await queryGaikaiApolloId(access.exchange.accessToken, { method: 'GET' });
+    const config = await queryGaikaiConfig(access.exchange.accessToken, { clientSessionId: apollo.clientSessionId });
+    const [cloudCode, cloudPs4Code, ps3Code, ssoCode] = await Promise.all([
+      exchangeNpssoForGaikaiCode(access.npsso, 'cloud'),
+      exchangeNpssoForGaikaiCode(access.npsso, 'cloud-ps4'),
+      exchangeNpssoForGaikaiCode(access.npsso, 'ps3'),
+      exchangeNpssoForGaikaiCode(access.npsso, 'sso'),
+    ]);
+
+    let smokeEvent: Awaited<ReturnType<typeof dispatchGaikaiEvent>> | null = null;
+    let smokeLog: Awaited<ReturnType<typeof dispatchGaikaiLog>> | null = null;
+    if (parsed.flags['smoke-dispatch']) {
+      smokeEvent = await dispatchGaikaiEvent(access.exchange.accessToken, apollo.clientSessionId, gaikaiPresetEvent(apollo.clientSessionId));
+      smokeLog = await dispatchGaikaiLog(access.exchange.accessToken, apollo.clientSessionId, {
+        level: 'info',
+        message: 'ps-wen gaikai preflight',
+        clientSessionId: apollo.clientSessionId,
+      });
+    }
+
+    const result = {
+      generatedAt: new Date().toISOString(),
+      npssoSource: access.source,
+      token: {
+        clientId: access.exchange.clientId,
+        expiresIn: access.exchange.expiresIn,
+        scope: access.exchange.scope,
+      },
+      kamajiSession: {
+        jsessionIdPresent: Boolean(session.jsessionId),
+        webduidPresent: Boolean(session.webduid),
+        recognizedSession: session.recognizedSession,
+        accountId: session.accountId,
+        onlineId: session.onlineId,
+      },
+      gaikai: {
+        apolloId: apollo.apolloId,
+        clientSessionId: apollo.clientSessionId,
+        configKeys: Object.keys(config.decodedConfig),
+        config: config.decodedConfig,
+      },
+      authCodes: {
+        cloud: cloudCode,
+        cloudPs4: cloudPs4Code,
+        ps3: ps3Code,
+        sso: ssoCode,
+      },
+      smokeDispatch: parsed.flags['smoke-dispatch']
+        ? { event: smokeEvent, log: smokeLog }
+        : null,
+      notes: [
+        'This captures the browser/HTTP-side stream preflight surface.',
+        'Actual launch still requires the native broker/plugin path for requestClientId, setSettings, setAuthCodes, requestGame, and startGame.',
+      ],
+    };
+
+    const outputPath = resolveArtifactPath(
+      typeof parsed.flags.out === 'string' ? parsed.flags.out : undefined,
+      DEFAULT_GAIKAI_PREFLIGHT_OUT
+    );
+    await writeArtifact(result, outputPath);
+
+    if (asJson(parsed)) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`[psn-direct] Wrote: ${outputPath}`);
+    console.log(`NPSSO source     : ${result.npssoSource}`);
+    console.log(`Token expires    : ${result.token.expiresIn}s`);
+    console.log(`Online ID        : ${result.kamajiSession.onlineId}`);
+    console.log(`Recognized       : ${result.kamajiSession.recognizedSession}`);
+    console.log(`Apollo ID        : ${result.gaikai.apolloId}`);
+    console.log(`ClientSessionId  : ${result.gaikai.clientSessionId}`);
+    console.log(`Gaikai config    : ${result.gaikai.configKeys.join(', ')}`);
+    console.log(`Cloud code       : ${result.authCodes.cloud.code}`);
+    console.log(`Cloud+lists code : ${result.authCodes.cloudPs4.code}`);
+    console.log(`PS3 code         : ${result.authCodes.ps3.code}`);
+    console.log(`SSO code         : ${result.authCodes.sso.code}`);
+    if (result.smokeDispatch) {
+      console.log(`Smoke event      : ${result.smokeDispatch.event?.status}`);
+      console.log(`Smoke log        : ${result.smokeDispatch.log?.status}`);
+    }
+    for (const note of result.notes) console.log(`Note            : ${note}`);
+    return;
+  }
+
+  throw new Error(`Unknown gaikai subcommand: ${subcommand}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,6 +1324,7 @@ async function main() {
     if (parsed.positional[0] === 'send') return cmdBrokerSend(parsed);
     return cmdBroker(parsed);
   }
+  if (parsed.command === 'gaikai') return cmdGaikai(parsed);
   if (parsed.command === 'status') return cmdStatus(parsed);
 
   usage();

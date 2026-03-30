@@ -278,13 +278,15 @@ export async function readLocalPsnCookies(options?: {
 const OAUTH_AUTHORIZE_BASE = 'https://ca.account.sony.com/api/v1/oauth/authorize';
 const PSNOW_REDIRECT_URI =
   'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/grc-response.html';
+const GAIKAI_LOCAL_REDIRECT_URI = 'gaikai://local';
 const OBSERVED_DUID = '000000070040008864383a34333a61653a31343a35613a6130';
 
 function buildAuthorizeUrl(
   clientId: string,
   responseType: 'code' | 'token',
   scope: string,
-  duid = OBSERVED_DUID
+  duid = OBSERVED_DUID,
+  redirectUri = PSNOW_REDIRECT_URI
 ): string {
   const params = new URLSearchParams({
     smcid: 'pc:psnow',
@@ -292,7 +294,7 @@ function buildAuthorizeUrl(
     response_type: responseType,
     scope,
     client_id: clientId,
-    redirect_uri: PSNOW_REDIRECT_URI,
+    redirect_uri: redirectUri,
     grant_type: 'authorization_code',
     service_entity: 'urn:service-entity:psn',
     prompt: 'none',
@@ -308,6 +310,63 @@ function buildAuthorizeUrl(
     duid,
   });
   return `${OAUTH_AUTHORIZE_BASE}?${params.toString()}`;
+}
+
+function parseCodeRedirect(location: string): { code: string; correlationId: string; targetUrl: string | null } {
+  try {
+    const url = new URL(location);
+    const directCode = url.searchParams.get('code');
+    const directCid = url.searchParams.get('cid');
+    if (directCode) {
+      return {
+        code: directCode,
+        correlationId: directCid ?? '',
+        targetUrl: null,
+      };
+    }
+
+    const targetUrl = url.searchParams.get('targetUrl');
+    if (targetUrl) {
+      const nested = new URL(targetUrl);
+      const nestedCode = nested.searchParams.get('code');
+      const nestedCid = nested.searchParams.get('cid');
+      if (nestedCode) {
+        return {
+          code: nestedCode,
+          correlationId: nestedCid ?? '',
+          targetUrl,
+        };
+      }
+    }
+  } catch {
+    // fall back to regex below
+  }
+
+  const directCode = location.match(/[?&]code=([^&\s]+)/)?.[1];
+  const directCid = location.match(/[?&]cid=([^&\s]+)/)?.[1];
+  if (directCode) {
+    return {
+      code: decodeURIComponent(directCode),
+      correlationId: directCid ? decodeURIComponent(directCid) : '',
+      targetUrl: null,
+    };
+  }
+
+  const nestedTargetRaw = location.match(/[?&]targetUrl=([^&\s]+)/)?.[1];
+  if (nestedTargetRaw) {
+    const nestedTarget = decodeURIComponent(nestedTargetRaw);
+    const nestedCode = nestedTarget.match(/[?&]code=([^&\s]+)/)?.[1];
+    const nestedCid = nestedTarget.match(/[?&]cid=([^&\s]+)/)?.[1];
+    if (nestedCode) {
+      return {
+        code: decodeURIComponent(nestedCode),
+        correlationId: nestedCid ? decodeURIComponent(nestedCid) : '',
+        targetUrl: nestedTarget,
+      };
+    }
+  }
+
+  throw new Error(`No code in redirect location: ${location.slice(0, 300)}`);
 }
 
 export type TokenExchangeResult = {
@@ -326,6 +385,36 @@ export type CodeExchangeResult = {
   obtainedAt: string;
   clientId: string;
   scope: string;
+  redirectLocation?: string;
+  targetUrl?: string | null;
+};
+
+export type GaikaiAuthCodeKind = 'cloud' | 'cloud-ps4' | 'ps3' | 'sso';
+
+export const GAIKAI_AUTH_CODE_FLOWS: Record<
+  GaikaiAuthCodeKind,
+  { clientId: string; scope: string; redirectUri: string }
+> = {
+  cloud: {
+    clientId: GAIKAI_CLIENT_IDS.gkClient,
+    scope: 'kamaji:commerce_native versa:user_update_entitlements_first_play versa:user_get_devices',
+    redirectUri: GAIKAI_LOCAL_REDIRECT_URI,
+  },
+  'cloud-ps4': {
+    clientId: GAIKAI_CLIENT_IDS.gkClient,
+    scope: 'kamaji:commerce_native versa:user_update_entitlements_first_play versa:user_get_devices kamaji:lists',
+    redirectUri: GAIKAI_LOCAL_REDIRECT_URI,
+  },
+  ps3: {
+    clientId: GAIKAI_CLIENT_IDS.ps3GkClientId,
+    scope: 'kamaji:commerce_native',
+    redirectUri: GAIKAI_LOCAL_REDIRECT_URI,
+  },
+  sso: {
+    clientId: PSN_OAUTH_CLIENTS.sso.clientId,
+    scope: PSN_OAUTH_CLIENTS.sso.scope,
+    redirectUri: GAIKAI_LOCAL_REDIRECT_URI,
+  },
 };
 
 /**
@@ -345,7 +434,7 @@ export async function exchangeNpssoForToken(
     );
   }
 
-  const url = buildAuthorizeUrl(client.clientId, 'token', client.scope, duid);
+  const url = buildAuthorizeUrl(client.clientId, 'token', client.scope, duid, PSNOW_REDIRECT_URI);
   const response = await fetch(url, {
     method: 'GET',
     redirect: 'manual',
@@ -392,7 +481,7 @@ export async function exchangeNpssoForCode(
   duid = OBSERVED_DUID
 ): Promise<CodeExchangeResult> {
   const client = PSN_OAUTH_CLIENTS[clientName];
-  const url = buildAuthorizeUrl(client.clientId, 'code', client.scope, duid);
+  const url = buildAuthorizeUrl(client.clientId, 'code', client.scope, duid, PSNOW_REDIRECT_URI);
   const response = await fetch(url, {
     method: 'GET',
     redirect: 'manual',
@@ -410,19 +499,53 @@ export async function exchangeNpssoForCode(
   }
 
   const location = response.headers.get('location') ?? '';
-  const codeMatch = location.match(/[?&]code=([^&\s]+)/);
-  const cidMatch = location.match(/[?&]cid=([^&\s]+)/);
-
-  if (!codeMatch) {
-    throw new Error(`No code in redirect location: ${location.slice(0, 300)}`);
-  }
+  const parsed = parseCodeRedirect(location);
 
   return {
-    code: decodeURIComponent(codeMatch[1]),
-    correlationId: cidMatch ? decodeURIComponent(cidMatch[1]) : '',
+    code: parsed.code,
+    correlationId: parsed.correlationId,
     obtainedAt: new Date().toISOString(),
     clientId: client.clientId,
     scope: client.scope,
+    redirectLocation: location,
+    targetUrl: parsed.targetUrl,
+  };
+}
+
+export async function exchangeNpssoForGaikaiCode(
+  npsso: string,
+  kind: GaikaiAuthCodeKind = 'cloud',
+  duid = OBSERVED_DUID
+): Promise<CodeExchangeResult & { kind: GaikaiAuthCodeKind }> {
+  const flow = GAIKAI_AUTH_CODE_FLOWS[kind];
+  const url = buildAuthorizeUrl(flow.clientId, 'code', flow.scope, duid, flow.redirectUri);
+  const response = await fetch(url, {
+    method: 'GET',
+    redirect: 'manual',
+    headers: {
+      Cookie: `npsso=${npsso}`,
+      'User-Agent': APP_UA,
+    },
+  });
+
+  if (response.status !== 302) {
+    const body = await response.text().catch(() => '');
+    throw new Error(
+      `Expected 302 redirect from Gaikai OAuth authorize, got ${response.status}. Body: ${body.slice(0, 300)}`
+    );
+  }
+
+  const location = response.headers.get('location') ?? '';
+  const parsed = parseCodeRedirect(location);
+  return {
+    kind,
+    code: parsed.code,
+    correlationId: parsed.correlationId,
+    obtainedAt: new Date().toISOString(),
+    clientId: flow.clientId,
+    scope: flow.scope,
+    redirectLocation: location,
+    targetUrl: parsed.targetUrl,
   };
 }
 
@@ -537,6 +660,159 @@ export type BrokerProbeResult = {
   probedAt: string;
   error?: string;
 };
+
+// ---------------------------------------------------------------------------
+// Gaikai HTTP helpers
+// ---------------------------------------------------------------------------
+
+export type GaikaiApolloIdResult = {
+  apolloId: string;
+  clientSessionId: string;
+  method: 'GET' | 'POST';
+  queriedAt: string;
+};
+
+export async function queryGaikaiApolloId(
+  accessToken: string,
+  options?: { method?: 'GET' | 'POST'; clientSessionId?: string | null }
+): Promise<GaikaiApolloIdResult> {
+  const method = options?.method ?? 'GET';
+  const headers: Record<string, string> = {
+    'X-Access-Token': accessToken,
+    'X-NP-Env': 'np',
+    Accept: 'application/json',
+    'User-Agent': APP_UA,
+  };
+  if (options?.clientSessionId) {
+    headers['X-Gaikai-ClientSessionId'] = options.clientSessionId;
+  }
+  if (method === 'POST') {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch('https://cc.prod.gaikai.com/v1/apollo/id', {
+    method,
+    headers,
+    body: method === 'POST' ? '{}' : undefined,
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Gaikai apollo/id failed: ${response.status}. Body: ${text.slice(0, 300)}`);
+  }
+
+  const json = JSON.parse(text) as { apolloId?: string; clientSessionId?: string };
+  return {
+    apolloId: String(json.apolloId ?? ''),
+    clientSessionId: String(json.clientSessionId ?? ''),
+    method,
+    queriedAt: new Date().toISOString(),
+  };
+}
+
+export type GaikaiConfigResult = {
+  rawConfigBase64: string;
+  decodedConfig: Record<string, unknown>;
+  queriedAt: string;
+};
+
+export async function queryGaikaiConfig(
+  accessToken: string,
+  options?: { clientSessionId?: string | null }
+): Promise<GaikaiConfigResult> {
+  const headers: Record<string, string> = {
+    'X-Access-Token': accessToken,
+    'X-NP-Env': 'np',
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'User-Agent': APP_UA,
+  };
+  if (options?.clientSessionId) {
+    headers['X-Gaikai-ClientSessionId'] = options.clientSessionId;
+  }
+
+  const response = await fetch('https://config.cc.prod.gaikai.com/v1/config', {
+    method: 'POST',
+    headers,
+    body: '{}',
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Gaikai config failed: ${response.status}. Body: ${text.slice(0, 300)}`);
+  }
+
+  const json = JSON.parse(text) as { config?: string };
+  const rawConfigBase64 = String(json.config ?? '');
+  const decodedText = Buffer.from(rawConfigBase64, 'base64').toString('utf8');
+  const decodedConfig = JSON.parse(decodedText) as Record<string, unknown>;
+
+  return {
+    rawConfigBase64,
+    decodedConfig,
+    queriedAt: new Date().toISOString(),
+  };
+}
+
+export type GaikaiDispatchResult = {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+  bodyJson: unknown | null;
+  dispatchedAt: string;
+};
+
+async function dispatchGaikaiJson(
+  endpoint: 'events' | 'logs',
+  accessToken: string,
+  clientSessionId: string,
+  payload: unknown
+): Promise<GaikaiDispatchResult> {
+  const response = await fetch(`https://client.cc.prod.gaikai.com/v1/${endpoint}`, {
+    method: 'POST',
+    headers: {
+      'X-Gaikai-ClientSessionId': clientSessionId,
+      'X-Access-Token': accessToken,
+      'X-NP-Env': 'np',
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': APP_UA,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const bodyText = await response.text();
+  let bodyJson: unknown | null = null;
+  try {
+    bodyJson = bodyText.trim() ? JSON.parse(bodyText) as unknown : null;
+  } catch {
+    bodyJson = null;
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    bodyText,
+    bodyJson,
+    dispatchedAt: new Date().toISOString(),
+  };
+}
+
+export function dispatchGaikaiEvent(
+  accessToken: string,
+  clientSessionId: string,
+  payload: unknown
+): Promise<GaikaiDispatchResult> {
+  return dispatchGaikaiJson('events', accessToken, clientSessionId, payload);
+}
+
+export function dispatchGaikaiLog(
+  accessToken: string,
+  clientSessionId: string,
+  payload: unknown
+): Promise<GaikaiDispatchResult> {
+  return dispatchGaikaiJson('logs', accessToken, clientSessionId, payload);
+}
 
 // ---------------------------------------------------------------------------
 // Kamaji session establishment

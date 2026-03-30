@@ -66,6 +66,12 @@ npm run api:psn-direct -- broker                  # localhost:1235 broker reacha
 npm run api:psn-direct -- broker send requestClientId --wait-ms 1500
 npm run api:psn-direct -- broker send setSettings '{"apolloSessionId":"...","entitlementID":"..."}'
 npm run api:psn-direct -- broker send --raw '{"command":"requestClientId","params":{}}'
+npm run api:psn-direct -- gaikai id               # mint Gaikai apolloId / clientSessionId
+npm run api:psn-direct -- gaikai config           # fetch + decode config.cc.prod.gaikai.com/v1/config
+npm run api:psn-direct -- gaikai auth-code --kind cloud
+npm run api:psn-direct -- gaikai event --preset app-load
+npm run api:psn-direct -- gaikai log --message 'ps-wen gaikai smoke'
+npm run api:psn-direct -- gaikai preflight        # full browser/HTTP-side stream preflight summary
 npm run api:psn-direct -- <cmd> --json            # machine-readable output for any command
 
 # ── Session intercept (Playwright) ─────────────────────────────────────────────
