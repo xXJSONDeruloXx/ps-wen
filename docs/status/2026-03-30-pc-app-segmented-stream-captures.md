@@ -37,6 +37,11 @@ npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-20261
 $env:CAPTURE_DURATION='60'
 npm run capture:metadata:windows
 npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-204138.pcapng
+
+# overlay-only slice while already in-session
+$env:CAPTURE_DURATION='90'
+npm run capture:metadata:windows
+npm run summarize:metadata -- artifacts/network/ps-cloud-metadata-20260329-204614.pcapng
 ```
 
 ## Artifacts
@@ -51,6 +56,8 @@ Local-only generated artifacts:
 - `artifacts/network/ps-cloud-metadata-20260329-202615.summary.json`
 - `artifacts/network/ps-cloud-metadata-20260329-204138.pcapng`
 - `artifacts/network/ps-cloud-metadata-20260329-204138.summary.json`
+- `artifacts/network/ps-cloud-metadata-20260329-204614.pcapng`
+- `artifacts/network/ps-cloud-metadata-20260329-204614.summary.json`
 
 ## Capture A — `201241` launch/start slice
 
@@ -144,6 +151,31 @@ Interpretation:
 - `client.cc.prod.gaikai.com` + `config.cc.prod.gaikai.com` + active Sony-owned UDP/2053 strongly suggest the session had already moved into stream bootstrap or early media startup, even if the first picture was not yet visible on screen
 - compared with the shorter launch/start slice, this capture omits `accounts.api.playstation.com` but retains most of the app/bootstrap/control family, which is consistent with a user that is already authenticated and is now entering the allocator/startup path for a selected title
 
+## Capture E — `204614` overlay-only slice
+
+This capture started while the game was already streaming, then the user:
+
+- opened the overlay
+- toggled vibration from on to off
+- dismissed the overlay with the controller home button
+
+Visible traffic was even narrower than the quit/save slices:
+
+- no fresh PlayStation/Sony DNS queries
+- no fresh PlayStation/Sony TLS SNI
+- one persistent high-volume UDP candidate:
+  - `udp://104.142.161.133:2053`
+- only tiny residual HTTPS bytes to already-known IPs such as the `psnow.playstation.com` address, without a new TLS handshake in the capture window
+
+Interpretation:
+
+- the overlay/vibration action does **not** appear to spin up a new obvious PlayStation hostname family
+- it likely rides one of:
+  - the already-established running-session control path
+  - the localhost broker plus an already-open remote channel
+  - or the long-lived UDP session transport itself
+- this is the strongest current hint that simple overlay actions are handled **in-band** with the existing session rather than by opening a fresh web-style control-plane transaction
+
 ## Cross-capture comparison
 
 ### 1. Bootstrap/setup hosts are front-loaded
@@ -178,6 +210,8 @@ Observed across segmented captures:
 - `udp://104.142.161.22:2053`
 - `udp://104.142.161.148:2053`
 - `udp://104.142.161.16:2053`
+- `udp://104.142.161.27:2053`
+- `udp://104.142.161.133:2053`
 
 Interpretation:
 
@@ -185,6 +219,15 @@ Interpretation:
 - the port family remains stable
 - the owning network remains Sony-owned
 - this is consistent with a session-assigned custom UDP streaming path
+
+### 4. Overlay actions are quieter than quit/save actions
+
+The overlay-only slice did **not** surface fresh PlayStation DNS/TLS hostnames, while quit/save slices still showed at least some visible `client.cc` / `psnow` activity.
+
+Interpretation:
+
+- simple overlay toggles may ride an already-open stream/control channel
+- if the localhost broker is involved, its network consequence may be too small or too indirect to produce a distinct remote hostname signature in this capture window
 
 ## Current best model after segmentation
 
@@ -225,10 +268,14 @@ These segmented captures still do **not** reveal:
 
 ## Best next follow-ups
 
-1. **Delete-from-online-storage only** capture, matching the copy-only run.
-2. **Overlay-only** capture (open overlay, toggle vibration once, close overlay).
-3. Another short **click-from-list to picture-only** capture, but with explicit operator timing notes for:
+1. Another short **click-from-list to picture-only** capture, but with explicit operator timing notes for:
    - click title
    - queue/server wait begins
    - first visible picture
-4. Any future note-taking or broker correlation that can align user action timestamps against these segmented host/port families.
+2. A matching **quit-game** capture with explicit timing notes for:
+   - overlay open
+   - quit selected
+   - confirm pressed
+   - window closes
+3. Localhost broker correlation, if a safe observation path can be added, to line up overlay/quit actions against the already-observed `ws://localhost:1235/` control surface.
+4. **Optional / lower priority**: delete-from-online-storage-only capture, if save-management semantics become important again.

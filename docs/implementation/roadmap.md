@@ -67,9 +67,10 @@ This is the living done/todo tracker for turning current evidence into a clean-r
 
 - **In progress**: save-management mapping
   - copy-to-online-storage did not surface a distinct obvious save-only PlayStation hostname family
-  - still need the delete-only comparison run
+  - delete-only comparison remains optional unless save-management becomes a real MVP requirement
 - **In progress**: overlay-action mapping
-  - still need a cleaner overlay-only capture
+  - an overlay-only capture is now recorded
+  - it did not surface fresh PlayStation DNS/TLS hostnames, which suggests simple overlay toggles may ride an already-open session/broker path
 
 ### MVP shell
 
@@ -79,15 +80,14 @@ This is the living done/todo tracker for turning current evidence into a clean-r
 
 ### Highest-value evidence collection
 
-1. **Delete-from-online-storage only** segmented capture
-   - compare directly against the copy-only run
-2. **Overlay-only** segmented capture
-   - open overlay, toggle vibration once, close overlay
-3. **Cleaner click-from-list to picture-only** segmented capture
+1. **Cleaner click-from-list to picture-only** segmented capture
    - one such run already suggests allocation/startup had progressed into `client.cc` + Sony-owned UDP/2053 before the first visible frame
    - repeat with explicit timing notes for title click and first picture
-4. **Action timestamp correlation**
+2. **Timed quit-game capture**
+   - repeat with explicit timing notes for overlay open, quit select, confirm, and window close
+3. **Action timestamp correlation**
    - note approximate user action times during capture windows so host/port shifts can be matched to UI actions more precisely
+4. **Optional / lower priority**: delete-from-online-storage-only segmented capture if save-management becomes important again
 
 ### Highest-value implementation work
 

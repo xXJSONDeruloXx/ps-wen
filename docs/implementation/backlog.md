@@ -56,7 +56,13 @@ See also: `docs/implementation/roadmap.md` for the living done/in-progress/next 
 5. **Done**: extend the observation-backed provider prototype so more clean-room logic can develop against cached artifacts instead of live account traffic (`npm run prototype:psplus -- status|bootstrap|entitlements|allocate|login`).
 6. **Done in part**: add a browser-login state machine / confirmation flow on top of the observation-backed PlayStation Plus prototype (`login`, `confirm-login`, `reset-flow`, persisted flow-state artifact).
 7. Build the next MVP layer on top of that flow: diagnostics, broker adapter seam, and placeholder queue/launch UX.
-8. If further live GraphQL probing is needed, derive or otherwise confirm persisted hashes only for the small set of currently unprobed read-only bundle queries (`getExperienceId`, `getResolvedProduct`, `wcaRetrieveWishlist`) before issuing spaced requests.
+8. Use the new segmented capture set to compare:
+   - click-from-list / waiting-for-server
+   - launch/start slice
+   - overlay-only
+   - quit-game
+   and keep the docs/roadmap current as those boundaries sharpen.
+9. If further live GraphQL probing is needed, derive or otherwise confirm persisted hashes only for the small set of currently unprobed read-only bundle queries (`getExperienceId`, `getResolvedProduct`, `wcaRetrieveWishlist`) before issuing spaced requests.
 
 ## Priority 5 — cloud-stream specific validation
 
