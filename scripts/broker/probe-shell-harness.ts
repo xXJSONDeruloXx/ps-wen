@@ -4,7 +4,12 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { loadEnv, resolveArtifactPath, toBoolean } from '../lib/env.js';
-import { probeBrokerReachability } from '../lib/psn-auth.js';
+import {
+  exchangeNpssoForCode,
+  exchangeNpssoForToken,
+  probeBrokerReachability,
+  readNpssoFromStorageState,
+} from '../lib/psn-auth.js';
 
 const APP_URL = 'https://psnow.playstation.com/app/2.2.0/133/5cdcc037d/';
 const DEFAULT_STORAGE_STATE = 'artifacts/auth/playstation-storage-state.json';
@@ -31,6 +36,9 @@ type HarnessReport = {
   brokerLogPath: string | null;
   brokerStatePath: string | null;
   settleMs: number;
+  ageGateCompleted: boolean;
+  screenClickCompleted: boolean;
+  textClickCompleted: boolean;
   consoleMessages: Array<{ type: string; text: string }>;
   pageErrors: string[];
   requestFailures: Array<{ url: string; errorText: string }>;
@@ -63,6 +71,57 @@ type HarnessReport = {
       visible: boolean;
       src: string | null;
     }>;
+    links: Array<{
+      text: string;
+      href: string | null;
+    }>;
+  };
+  authDebug: {
+    storageStateSummary: {
+      exists: boolean;
+      cookieCount: number;
+      originCount: number;
+      playstationCookieNames: string[];
+      originUrls: string[];
+    };
+    gcSessionService: {
+      present: boolean;
+      createAuthCodeSession: boolean;
+      createAccessTokenSession: boolean;
+      patched: boolean;
+    };
+    contextCookies: Array<{
+      name: string;
+      domain: string;
+      path: string;
+      secure: boolean;
+      httpOnly: boolean;
+      sameSite: string;
+      valueLength: number;
+      valuePreview: string | null;
+    }>;
+    currentOriginStorage: {
+      origin: string;
+      localStorage: Array<{ key: string; valueLength: number; valuePreview: string | null }>;
+      sessionStorage: Array<{ key: string; valueLength: number; valuePreview: string | null }>;
+    };
+    storageStateOrigins: Array<{
+      origin: string;
+      localStorageKeys: string[];
+      interestingLocalStorage: Array<{ key: string; valueLength: number; valuePreview: string | null }>;
+    }>;
+    requestTrace: Array<{
+      stage: 'request' | 'response';
+      method: string;
+      url: string;
+      resourceType: string;
+      postDataPreview?: string | null;
+      status?: number;
+      location?: string | null;
+      setCookieNames?: string[];
+      contentType?: string | null;
+      bodyPreview?: string | null;
+    }>;
   };
   scenarios: unknown[];
   bridgeLog: unknown[];
@@ -76,18 +135,126 @@ const INIT_SCRIPT = String.raw`(function () {
   };
   root.__PSWEN_BRIDGE_LOG = bridgeLog;
   root.pluginHandler = root.pluginHandler || {};
-  root.sce = {
+  root.sce = root.sce || {
+    readRegistry: function (key) {
+      if (key === 'net_common_device') return 'wifi';
+      return null;
+    },
     exit: function () {
       record('sce.exit', Array.prototype.slice.call(arguments));
     }
   };
+
   var listeners = new Map();
+  var callbackEvent = null;
+  var callbackError = null;
+  var brokerWs = null;
+  var brokerReady = null;
+  var brokerUrl = root.__PSWEN_BROKER_URL || 'ws://localhost:1235/';
+
+  function translateBrokerName(name) {
+    switch (name) {
+      case 'GOT_CLIENT_ID': return 'GotClientId';
+      case 'PROCESS_END': return 'ProcessEnd';
+      case 'GOT_LAUNCH_SPEC': return 'GotLaunchSpec';
+      case 'VIDEO_START': return 'VideoStart';
+      case 'IS_STREAMING': return 'isStreaming';
+      case 'IS_QUEUED': return 'isQueued';
+      default: return name;
+    }
+  }
+
+  function getListeners(name) {
+    return listeners.get(name) || [];
+  }
+
+  function emitListener(name, payload) {
+    getListeners(name).forEach(function (cb) {
+      try { cb(payload); } catch (error) { record('ipc.listener.error', { name: name, error: String(error) }); }
+    });
+  }
+
+  function emitPluginEvent(eventObj) {
+    emitListener('event', eventObj);
+    if (callbackEvent) {
+      try { callbackEvent(eventObj); } catch (error) { record('ipc.callback.error', { error: String(error) }); }
+    }
+  }
+
+  function dispatchBrokerEvent(parsed) {
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.name !== 'string') return;
+    var translated = translateBrokerName(parsed.name);
+    var payload = parsed.payload || {};
+    var code = parsed.code;
+    if (translated === 'isStreaming') {
+      emitPluginEvent({ type: 'isStreaming', name: payload && payload.isStreaming ? payload.isStreaming : 'true' });
+      return;
+    }
+    if (translated === 'isQueued') {
+      emitPluginEvent({ type: 'isQueued', name: payload && payload.isQueued ? payload.isQueued : 'false' });
+      return;
+    }
+    var eventObj = { name: translated, code: code, result: JSON.stringify(payload) };
+    emitPluginEvent(eventObj);
+  }
+
+  function ensureBroker() {
+    if (brokerWs && brokerWs.readyState === WebSocket.OPEN) return Promise.resolve(brokerWs);
+    if (brokerReady) return brokerReady;
+    brokerReady = new Promise(function (resolve, reject) {
+      var ws = new WebSocket(brokerUrl);
+      brokerWs = ws;
+      ws.addEventListener('open', function () {
+        record('ipc.ws.open', { url: brokerUrl });
+        emitListener('connected', { type: 'connected' });
+        resolve(ws);
+      }, { once: true });
+      ws.addEventListener('error', function () {
+        record('ipc.ws.error', { url: brokerUrl });
+        reject(new Error('WebSocket error'));
+      }, { once: true });
+      ws.addEventListener('message', function (event) {
+        var text = typeof event.data === 'string' ? event.data : String(event.data);
+        record('ipc.ws.in', text);
+        var parsed = null;
+        try { parsed = JSON.parse(text); } catch { parsed = null; }
+        if (parsed && parsed.name) dispatchBrokerEvent(parsed);
+      });
+      ws.addEventListener('close', function () {
+        record('ipc.ws.close', { url: brokerUrl });
+        brokerWs = null;
+      });
+    }).finally(function () {
+      brokerReady = null;
+    });
+    return brokerReady;
+  }
+
+  function sendBroker(command, params) {
+    return ensureBroker().then(function (ws) {
+      var text = JSON.stringify({ command: command, params: params || {} });
+      record('ipc.ws.out', text);
+      ws.send(text);
+      return true;
+    }).catch(function (error) {
+      record('ipc.ws.send.error', { command: command, error: String(error) });
+      return false;
+    });
+  }
+
   var ipc = {
+    identity: 'AGL',
     addListener: function (name, cb) {
       record('ipc.addListener', { name: name });
       var arr = listeners.get(name) || [];
       arr.push(cb);
       listeners.set(name, arr);
+      if (name === 'connected') {
+        Promise.resolve().then(function () { cb({ type: 'connected' }); });
+      }
+    },
+    on: function (name, cb, _key) {
+      this.addListener(name, cb);
     },
     removeListener: function (name, cb) {
       record('ipc.removeListener', { name: name });
@@ -98,17 +265,23 @@ const INIT_SCRIPT = String.raw`(function () {
       var arr = (listeners.get(name) || []).filter(function (item) { return item !== cb; });
       listeners.set(name, arr);
     },
+    off: function (name, cb, _key) {
+      this.removeListener(name, cb);
+    },
+    setCallbacks: function (eventCb, errorCb) {
+      record('ipc.setCallbacks', {});
+      callbackEvent = eventCb;
+      callbackError = errorCb;
+    },
+    ready: function () { record('ipc.ready', {}); },
     sendMessage: function (message, target) {
       record('ipc.sendMessage', { message: message, target: target });
     },
     windowControl: function (command, target) {
       record('ipc.windowControl', { command: command, target: target });
       if (command === 'query') {
-        var emit = function (name, payload) {
-          (listeners.get(name) || []).forEach(function (cb) { cb(payload); });
-        };
-        emit('window-restore', { target: target || 'AGL', name: 'restore' });
-        emit('window-focus', { target: target || 'AGL', name: 'focus' });
+        emitListener('window-restore', { target: target || 'AGL', name: 'restore' });
+        emitListener('window-focus', { target: target || 'AGL', name: 'focus' });
       }
     },
     setUrl: function (url, target) { record('ipc.setUrl', { url: url, target: target }); },
@@ -119,13 +292,87 @@ const INIT_SCRIPT = String.raw`(function () {
     notificationWindowSetVisible: function (value) { record('ipc.notificationWindowSetVisible', { value: value }); },
     notificationWindowSetUrl: function (url) { record('ipc.notificationWindowSetUrl', { url: url }); },
     updater: function (payload) { record('ipc.updater', payload); },
-    getVersion: function () { record('ipc.getVersion', {}); return 'mock-ipc/0.1.0'; }
+    applicationCommand: function (command) { record('ipc.applicationCommand', { command: command }); },
+    getVersion: function () { record('ipc.getVersion', { identity: this.identity }); return 'mock-ipc/0.1.0'; },
+    getDuid: function () {
+      var duid = '0000000700400190' + 'mockduid' + Date.now();
+      record('ipc.getDuid', { duid: duid });
+      return duid;
+    },
+    getPrivacySetting: function () {
+      record('ipc.getPrivacySetting', {});
+      Promise.resolve().then(function () {
+        emitPluginEvent({ type: 'privacySetting', name: 'ALL' });
+      });
+    },
+    sendConnectedControllerEvent: function () { record('ipc.sendConnectedControllerEvent', {}); },
+    gamepadSetRumbleEnabled: function (playerId, enabled) { record('ipc.gamepadSetRumbleEnabled', { playerId: playerId, enabled: enabled }); },
+    requestClientId: function () { return sendBroker('requestClientId', {}); },
+    setSettings: function (payload) { return sendBroker('setSettings', typeof payload === 'string' ? (function(){ try{return JSON.parse(payload);}catch{return { raw: payload }; } })() : payload); },
+    requestGame: function (payload) { return sendBroker('requestGame', typeof payload === 'boolean' ? { forceLogout: payload } : payload); },
+    startGame: function () { return sendBroker('startGame', {}); },
+    stop: function () { return sendBroker('stop', {}); },
+    testConnection: function () { return sendBroker('testConnection', {}); },
+    routeInputToPlayer: function () { return sendBroker('routeInputToPlayer', {}); },
+    routeInputToClient: function () { return sendBroker('routeInputToClient', {}); },
+    rawDataDeepLink: function (a, b) { return sendBroker('rawDataDeepLink', { a: a, b: b }); },
+    saveDataDeepLink: function (payload) { return sendBroker('saveDataDeepLink', payload); },
+    invitationDeepLink: function (requestId, sessionId, invitationId) { return sendBroker('invitationDeepLink', { requestId: requestId, sessionId: sessionId, invitationId: invitationId }); },
+    gameAlertDeepLink: function (requestId, itemId) { return sendBroker('gameAlertDeepLink', { requestId: requestId, itemId: itemId }); },
+    sendXmbCommand: function (a, b) { return sendBroker('sendXmbCommand', { a: a, b: b }); },
+    isStreaming: function () { return sendBroker('isStreaming', {}); },
+    isQueued: function () { return sendBroker('isQueued', {}); }
   };
   root.gaikai = root.gaikai || {};
   root.gaikai.ipc = ipc;
   root.__pswenEmitIpcEvent = function (name, payload) {
-    (listeners.get(name) || []).forEach(function (cb) { cb(payload); });
+    emitListener(name, payload);
   };
+})();`;
+
+const AUTH_SESSION_PATCH_SCRIPT = String.raw`(function () {
+  var root = window;
+  function record(kind, payload) {
+    var log = root.__PSWEN_BRIDGE_LOG = root.__PSWEN_BRIDGE_LOG || [];
+    log.push({ ts: new Date().toISOString(), kind: kind, payload: payload });
+  }
+  function tryPatch() {
+    try {
+      var GC = root.GrandCentral;
+      var proto = GC && GC.UserSessionService && GC.UserSessionService.prototype;
+      if (!proto || proto.__pswenAuthPatched) return Boolean(proto && proto.__pswenAuthPatched);
+      if (typeof proto.createAccessTokenSession !== 'function') return false;
+      var original = typeof proto.createAuthCodeSession === 'function' ? proto.createAuthCodeSession : null;
+      proto.createAuthCodeSession = function () {
+        record('auth.patch.createAuthCodeSession', { mode: 'createAccessTokenSession' });
+        try {
+          return proto.createAccessTokenSession.call(this).catch(function (error) {
+            record('auth.patch.createAccessTokenSession.error', { error: String(error) });
+            if (original) return original.call(this);
+            throw error;
+          }.bind(this));
+        } catch (error) {
+          record('auth.patch.createAccessTokenSession.throw', { error: String(error) });
+          if (original) return original.call(this);
+          throw error;
+        }
+      };
+      proto.__pswenAuthPatched = true;
+      record('auth.patch.applied', {
+        createAuthCodeSession: typeof proto.createAuthCodeSession === 'function',
+        createAccessTokenSession: typeof proto.createAccessTokenSession === 'function'
+      });
+      return true;
+    } catch (error) {
+      record('auth.patch.error', { error: String(error) });
+      return false;
+    }
+  }
+  if (tryPatch()) return;
+  var startedAt = Date.now();
+  var timer = setInterval(function () {
+    if (tryPatch() || Date.now() - startedAt > 30000) clearInterval(timer);
+  }, 50);
 })();`;
 
 const PAGE_SCENARIO_SCRIPT = String.raw`(async function () {
@@ -619,6 +866,190 @@ function asNumber(flag: string | true | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function sanitizeSensitiveText(value: string | null | undefined) {
+  if (value == null) return null;
+  return value
+    .replace(/([#?&]access_token=)[^&#\s]+/gi, '$1<redacted>')
+    .replace(/([?&]token=)[^&]+/gi, '$1<redacted>')
+    .replace(/(^|&)token=[^&]+/gi, '$1token=<redacted>')
+    .replace(/([#?&]code=)[^&#\s]+/gi, '$1<redacted>')
+    .replace(/(^|&)code=[^&]+/gi, '$1code=<redacted>')
+    .replace(/("token"\s*:\s*")([^"]+)(")/gi, '$1<redacted>$3')
+    .replace(/("access_token"\s*:\s*")([^"]+)(")/gi, '$1<redacted>$3')
+    .replace(/("auth_code"\s*:\s*")([^"]+)(")/gi, '$1<redacted>$3');
+}
+
+function previewValue(value: string | null | undefined, max = 160) {
+  if (value == null) return null;
+  const sanitized = sanitizeSensitiveText(value) ?? '';
+  return sanitized.length > max ? `${sanitized.slice(0, max)}…` : sanitized;
+}
+
+function sanitizePostData(value: string | null | undefined) {
+  return sanitizeSensitiveText(value);
+}
+
+function isAuthTraceUrl(url: string) {
+  return /ca\.account\.sony\.com|my\.account\.sony\.com|web\.np\.playstation\.com\/api\/session|psnow\.playstation\.com\/kamaji\/api\/(?:pcnow|psnow)\/00_09_000\/user(?:\/session|\b)|oauth\/authorize|\/signin\b|login_required|ELdff/i.test(
+    url
+  );
+}
+
+function extractSetCookieNames(setCookieHeader: string | null | undefined) {
+  if (!setCookieHeader) return [];
+  const matches = [...setCookieHeader.matchAll(/(?:^|[\n,])\s*([^=;,\s]+)=/g)];
+  return [...new Set(matches.map((match) => match[1]).filter(Boolean))];
+}
+
+async function summarizeStorageStateFile(storageStatePath: string) {
+  if (!fs.existsSync(storageStatePath)) {
+    return {
+      exists: false,
+      cookieCount: 0,
+      originCount: 0,
+      playstationCookieNames: [] as string[],
+      originUrls: [] as string[],
+    };
+  }
+
+  const raw = await fsp.readFile(storageStatePath, 'utf8');
+  const parsed = JSON.parse(raw) as {
+    cookies?: Array<{ name?: string; domain?: string }>;
+    origins?: Array<{ origin?: string }>;
+  };
+  const cookies = parsed.cookies ?? [];
+  const origins = parsed.origins ?? [];
+  const playstationCookieNames = cookies
+    .filter((cookie) => /sony|playstation/i.test(String(cookie.domain ?? '')))
+    .map((cookie) => String(cookie.name ?? ''))
+    .filter(Boolean)
+    .sort();
+  const originUrls = origins.map((origin) => String(origin.origin ?? '')).filter(Boolean).sort();
+
+  return {
+    exists: true,
+    cookieCount: cookies.length,
+    originCount: origins.length,
+    playstationCookieNames,
+    originUrls,
+  };
+}
+
+async function maybeCompleteAgeGate(page: import('@playwright/test').Page, parsed: ParsedArgs) {
+  if (parsed.flags['auto-age-gate'] !== 'true') return false;
+  const dob = typeof parsed.flags['age-gate-dob'] === 'string' ? parsed.flags['age-gate-dob'] : '1990-06-15';
+  const [yyyy, mm, dd] = dob.split('-');
+  if (!yyyy || !mm || !dd) throw new Error(`Invalid --age-gate-dob: ${dob}`);
+
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  if (!/date of birth|region\/language/i.test(bodyText)) return false;
+
+  const month = page.locator('input:visible').nth(0);
+  const day = page.locator('input:visible').nth(1);
+  const year = page.locator('input:visible').nth(2);
+  await month.click();
+  await month.clear();
+  await month.pressSequentially(mm, { delay: 35 });
+  await month.press('Tab');
+  await day.click();
+  await day.clear();
+  await day.pressSequentially(dd, { delay: 35 });
+  await day.press('Tab');
+  await year.click();
+  await year.clear();
+  await year.pressSequentially(yyyy, { delay: 35 });
+  await year.press('Tab');
+
+  const regionButton = page.getByRole('button', { name: /united states - english|region\/language/i }).first();
+  await regionButton.click().catch(() => undefined);
+  const usEnglish = page.getByRole('button', { name: /united states - english/i }).last();
+  await usEnglish.click().catch(() => undefined);
+
+  const submit = page.getByRole('button', { name: /submit/i }).first();
+  await submit.click().catch(async () => {
+    await year.press('Enter');
+  });
+
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForTimeout(5_000);
+  return true;
+}
+
+async function maybeClickScreenPoint(page: import('@playwright/test').Page, parsed: ParsedArgs) {
+  const pointsFlag = parsed.flags['click-points'];
+  if (typeof pointsFlag === 'string' && pointsFlag.trim()) {
+    const pairs = pointsFlag
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const [x, y] = part.split(',').map((value) => Number(value.trim()));
+        if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`Invalid click point: ${part}`);
+        return { x, y };
+      });
+    for (const point of pairs) {
+      await page.mouse.click(point.x, point.y);
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+      await page.waitForTimeout(3_000);
+    }
+    return pairs.length > 0;
+  }
+
+  const x = parsed.flags['click-x'];
+  const y = parsed.flags['click-y'];
+  if (typeof x !== 'string' || typeof y !== 'string') return false;
+  const px = Number(x);
+  const py = Number(y);
+  if (!Number.isFinite(px) || !Number.isFinite(py)) throw new Error(`Invalid click point: ${x},${y}`);
+  await page.mouse.click(px, py);
+  await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+  await page.waitForTimeout(3_000);
+  return true;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function maybeClickText(page: import('@playwright/test').Page, parsed: ParsedArgs) {
+  const text = parsed.flags['click-text'];
+  if (typeof text !== 'string' || !text.trim()) return false;
+
+  const steps = text
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  let clickedAny = false;
+  for (const step of steps) {
+    const matcher = new RegExp(escapeRegExp(step), 'i');
+    const candidates = [
+      page.getByRole('button', { name: matcher }).first(),
+      page.getByRole('link', { name: matcher }).first(),
+      page.getByText(step, { exact: true }).first(),
+      page.getByText(matcher).first(),
+    ];
+
+    let clickedThisStep = false;
+    for (const target of candidates) {
+      try {
+        await target.click({ timeout: 5_000 });
+        await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+        await page.waitForTimeout(3_000);
+        clickedThisStep = true;
+        clickedAny = true;
+        break;
+      } catch {
+        // try the next candidate
+      }
+    }
+
+    if (!clickedThisStep) return clickedAny;
+  }
+
+  return clickedAny;
+}
+
 async function readGaikaiPreflight() {
   const preflightPath = resolveArtifactPath(undefined, 'artifacts/auth/gaikai-preflight.json');
   if (!fs.existsSync(preflightPath)) return null;
@@ -637,6 +1068,18 @@ async function waitForBroker(host: string, port: number, timeoutMs = 10_000) {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return false;
+}
+
+async function prepareInjectedOauth(storageStatePath: string, parsed: ParsedArgs) {
+  if (parsed.flags['inject-oauth'] !== 'true') return null;
+  if (!fs.existsSync(storageStatePath)) {
+    throw new Error(`Cannot --inject-oauth without storage state: ${storageStatePath}`);
+  }
+  const npsso = await readNpssoFromStorageState(storageStatePath);
+  if (!npsso) {
+    throw new Error(`No NPSSO found in storage state: ${storageStatePath}`);
+  }
+  return { npsso };
 }
 
 async function maybeSpawnBroker(host: string, port: number, parsed: ParsedArgs) {
@@ -715,11 +1158,14 @@ async function main() {
   await fsp.mkdir(path.dirname(reportPath), { recursive: true });
   await fsp.mkdir(path.dirname(screenshotPath), { recursive: true });
 
+  const injectedOauth = await prepareInjectedOauth(storageStatePath, parsed);
   const broker = await maybeSpawnBroker(host, port, parsed);
   const consoleMessages: Array<{ type: string; text: string }> = [];
   const pageErrors: string[] = [];
   const requestFailures: Array<{ url: string; errorText: string }> = [];
   const websockets = new Map<string, { url: string; sent: string[]; received: string[]; errors: string[] }>();
+  const authRequestTrace: HarnessReport['authDebug']['requestTrace'] = [];
+  const authTraceTasks: Promise<void>[] = [];
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
 
   try {
@@ -732,10 +1178,103 @@ async function main() {
     });
 
     await ctx.addInitScript({ content: INIT_SCRIPT });
+    if (parsed.flags['patch-auth-session'] === 'true') {
+      await ctx.addInitScript({ content: AUTH_SESSION_PATCH_SCRIPT });
+    }
 
     const page = await ctx.newPage();
+    if (injectedOauth) {
+      // Intercept silent OAuth redirects — fresh code/token per request (codes are single-use)
+      await page.route('https://ca.account.sony.com/api/v1/oauth/authorize**', async (route) => {
+        const req = route.request();
+        const url = new URL(req.url());
+        const responseType = url.searchParams.get('response_type');
+        const redirectUri = url.searchParams.get('redirect_uri') ?? `${APP_URL}grc-response.html`;
+
+        if (responseType === 'token') {
+          try {
+            const token = await exchangeNpssoForToken(injectedOauth.npsso, 'entitlements');
+            const location = `${redirectUri}#access_token=${encodeURIComponent(token.accessToken)}&cid=${encodeURIComponent(token.correlationId)}&token_type=${encodeURIComponent(token.tokenType)}&expires_in=${encodeURIComponent(String(token.expiresIn))}`;
+            await route.fulfill({ status: 302, headers: { location, 'content-type': 'text/plain' }, body: '' });
+          } catch (err) {
+            console.warn('[inject-oauth] token exchange failed, falling through:', String(err));
+            await route.continue();
+          }
+          return;
+        }
+
+        if (responseType === 'code') {
+          try {
+            const code = await exchangeNpssoForCode(injectedOauth.npsso, 'commerce');
+            const location = `${redirectUri}?code=${encodeURIComponent(code.code)}&cid=${encodeURIComponent(code.correlationId)}`;
+            await route.fulfill({ status: 302, headers: { location, 'content-type': 'text/plain' }, body: '' });
+          } catch (err) {
+            console.warn('[inject-oauth] code exchange failed, falling through:', String(err));
+            await route.continue();
+          }
+          return;
+        }
+
+        await route.continue();
+      });
+
+      // Patch DOB in guest-session fallback POSTs so the app uses the real account DOB
+      const realDob =
+        typeof parsed.flags['age-gate-dob'] === 'string' && parsed.flags['age-gate-dob'].trim()
+          ? parsed.flags['age-gate-dob'].trim()
+          : null;
+      if (realDob) {
+        await page.route(
+          'https://psnow.playstation.com/kamaji/api/pcnow/00_09_000/user/session',
+          async (route) => {
+            const req = route.request();
+            const body = req.postData() ?? '';
+            if (body.includes('date_of_birth=') && !body.includes(`date_of_birth=${realDob}`)) {
+              const patched = body.replace(/date_of_birth=[^&]+/, `date_of_birth=${realDob}`);
+              await route.continue({ postData: patched });
+            } else {
+              await route.continue();
+            }
+          }
+        );
+      }
+    }
     page.on('console', (msg) => consoleMessages.push({ type: msg.type(), text: msg.text() }));
     page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('request', (req) => {
+      if (!isAuthTraceUrl(req.url()) || authRequestTrace.length >= 120) return;
+      authRequestTrace.push({
+        stage: 'request',
+        method: req.method(),
+        url: req.url(),
+        resourceType: req.resourceType(),
+        postDataPreview: previewValue(sanitizePostData(req.postData()), 300),
+      });
+    });
+    page.on('response', (resp) => {
+      const req = resp.request();
+      if (!isAuthTraceUrl(req.url()) || authRequestTrace.length >= 120) return;
+      const task = (async () => {
+        const headers = await resp.allHeaders().catch(() => ({} as Record<string, string>));
+        const contentType = headers['content-type'] ?? null;
+        let bodyPreview: string | null = null;
+        if (contentType && /json|text|javascript/.test(contentType)) {
+          bodyPreview = previewValue(await resp.text().catch(() => ''), 400);
+        }
+        authRequestTrace.push({
+          stage: 'response',
+          method: req.method(),
+          url: req.url(),
+          resourceType: req.resourceType(),
+          status: resp.status(),
+          location: sanitizeSensitiveText(headers.location ?? null),
+          setCookieNames: extractSetCookieNames(headers['set-cookie']),
+          contentType,
+          bodyPreview,
+        });
+      })();
+      authTraceTasks.push(task);
+    });
     page.on('requestfailed', (req) => {
       requestFailures.push({ url: req.url(), errorText: req.failure()?.errorText ?? 'unknown' });
     });
@@ -777,19 +1316,40 @@ async function main() {
       };
     });
 
-    const scenarios = (await page.evaluate(
-      ({ seed, script }) => {
-        (window as unknown as { __PSWEN_SEED?: unknown }).__PSWEN_SEED = seed;
-        return (0, eval)(script) as unknown;
-      },
-      { seed: launchSeed, script: PAGE_SCENARIO_SCRIPT }
-    )) as unknown[];
+    const scenarios = parsed.flags['skip-scenarios'] === 'true'
+      ? []
+      : ((await page.evaluate(
+          ({ seed, script }) => {
+            (window as unknown as { __PSWEN_SEED?: unknown }).__PSWEN_SEED = seed;
+            return (0, eval)(script) as unknown;
+          },
+          { seed: launchSeed, script: PAGE_SCENARIO_SCRIPT }
+        )) as unknown[]);
+
+    const ageGateCompleted = await maybeCompleteAgeGate(page, parsed);
+    if (ageGateCompleted) {
+      await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(3_000);
+    }
+
+    const screenClicked = await maybeClickScreenPoint(page, parsed);
+    if (screenClicked) {
+      await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(3_000);
+    }
+
+    const textClicked = await maybeClickText(page, parsed);
+    if (textClicked) {
+      await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(3_000);
+    }
 
     if (settleMs > 0) {
       await page.waitForTimeout(settleMs);
     }
 
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => undefined);
+    await Promise.allSettled(authTraceTasks);
 
     const bridgeLog = await page.evaluate(() => {
       const win = window as unknown as { __PSWEN_BRIDGE_LOG?: unknown[] };
@@ -822,6 +1382,13 @@ async function main() {
           };
         })
         .slice(0, 50);
+      const links = Array.from(document.querySelectorAll('a'))
+        .map((el) => ({
+          text: (el.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          href: el.getAttribute('href'),
+        }))
+        .filter((item) => item.text || item.href)
+        .slice(0, 80);
       return {
         pageUrl: location.href,
         title: document.title,
@@ -829,8 +1396,89 @@ async function main() {
         buttonTexts,
         headings,
         mediaElements,
+        links,
       };
     });
+
+    const currentOriginStorage = await page.evaluate(() => {
+      const localStorageItems = [] as Array<{ key: string; valueLength: number; valuePreview: string | null }>;
+      for (let index = 0; index < window.localStorage.length; index++) {
+        const key = window.localStorage.key(index) ?? '';
+        const value = window.localStorage.getItem(key) ?? '';
+        localStorageItems.push({
+          key,
+          valueLength: value.length,
+          valuePreview: value.length > 160 ? `${value.slice(0, 160)}…` : value,
+        });
+      }
+
+      const sessionStorageItems = [] as Array<{ key: string; valueLength: number; valuePreview: string | null }>;
+      for (let index = 0; index < window.sessionStorage.length; index++) {
+        const key = window.sessionStorage.key(index) ?? '';
+        const value = window.sessionStorage.getItem(key) ?? '';
+        sessionStorageItems.push({
+          key,
+          valueLength: value.length,
+          valuePreview: value.length > 160 ? `${value.slice(0, 160)}…` : value,
+        });
+      }
+
+      return {
+        origin: location.origin,
+        localStorage: localStorageItems,
+        sessionStorage: sessionStorageItems,
+      };
+    });
+
+    const gcSessionService = await page.evaluate(() => {
+      const GC = (window as unknown as { GrandCentral?: { UserSessionService?: { prototype?: Record<string, unknown> } } }).GrandCentral;
+      const proto = GC?.UserSessionService?.prototype;
+      return {
+        present: Boolean(proto),
+        createAuthCodeSession: typeof proto?.createAuthCodeSession === 'function',
+        createAccessTokenSession: typeof proto?.createAccessTokenSession === 'function',
+        patched: Boolean(proto && '__pswenAuthPatched' in proto),
+      };
+    }).catch(() => ({
+      present: false,
+      createAuthCodeSession: false,
+      createAccessTokenSession: false,
+      patched: false,
+    }));
+
+    const contextCookies = (await ctx.cookies())
+      .filter((cookie) => /sony|playstation/i.test(cookie.domain) || /npsso|pdc|sess|auth|token|user/i.test(cookie.name))
+      .map((cookie) => ({
+        name: cookie.name,
+        domain: cookie.domain,
+        path: cookie.path,
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        sameSite: cookie.sameSite,
+        valueLength: cookie.value.length,
+        valuePreview: previewValue(cookie.value),
+      }))
+      .sort((a, b) => `${a.domain}:${a.name}`.localeCompare(`${b.domain}:${b.name}`));
+
+    const storageStateSnapshot = (await ctx.storageState({ indexedDB: true })) as {
+      origins?: Array<{ origin?: string; localStorage?: Array<{ name?: string; value?: string }> }>;
+    };
+    const storageStateOrigins = (storageStateSnapshot.origins ?? [])
+      .map((origin) => ({
+        origin: String(origin.origin ?? ''),
+        localStorageKeys: (origin.localStorage ?? []).map((item) => String(item.name ?? '')).filter(Boolean).sort(),
+        interestingLocalStorage: (origin.localStorage ?? [])
+          .filter((item) => /user|sign|session|chimera|gpdc|token|auth/i.test(String(item.name ?? '')))
+          .map((item) => ({
+            key: String(item.name ?? ''),
+            valueLength: String(item.value ?? '').length,
+            valuePreview: previewValue(String(item.value ?? '')),
+          })),
+      }))
+      .filter((origin) => origin.origin || origin.localStorageKeys.length > 0)
+      .sort((a, b) => a.origin.localeCompare(b.origin));
+
+    const storageStateSummary = await summarizeStorageStateFile(storageStatePath);
 
     const report: HarnessReport = {
       generatedAt: new Date().toISOString(),
@@ -844,12 +1492,23 @@ async function main() {
       brokerLogPath: broker.brokerLogPath,
       brokerStatePath: broker.brokerStatePath,
       settleMs,
+      ageGateCompleted,
+      screenClickCompleted: screenClicked,
+      textClickCompleted: textClicked,
       consoleMessages,
       pageErrors,
       requestFailures,
       websockets: [...websockets.values()],
       initState,
       finalState,
+      authDebug: {
+        storageStateSummary,
+        gcSessionService,
+        contextCookies,
+        currentOriginStorage,
+        storageStateOrigins,
+        requestTrace: authRequestTrace,
+      },
       scenarios,
       bridgeLog,
     };
